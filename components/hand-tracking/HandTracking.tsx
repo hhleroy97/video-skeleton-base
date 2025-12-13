@@ -18,6 +18,47 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
   [5, 9], [9, 13], [13, 17],
 ];
 
+// MediaPipe hand landmark indices
+const THUMB_TIP = 4;
+const INDEX_FINGER_TIP = 8;
+const MIDDLE_FINGER_TIP = 12;
+const RING_FINGER_TIP = 16;
+const PINKY_TIP = 20;
+
+// Calculate 3D distance between two landmarks
+const calculateDistance = (point1: any, point2: any): number => {
+  const dx = point1.x - point2.x;
+  const dy = point1.y - point2.y;
+  const dz = (point1.z || 0) - (point2.z || 0);
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+};
+
+// Detect pinch gesture (thumb and index finger close together)
+const detectPinch = (
+  landmarks: any[],
+  threshold: number = 0.05
+): { isPinching: boolean; distance: number; pinchStrength: number } => {
+  if (!landmarks || landmarks.length < 21) {
+    return { isPinching: false, distance: Infinity, pinchStrength: 0 };
+  }
+
+  const thumbTip = landmarks[THUMB_TIP];
+  const indexTip = landmarks[INDEX_FINGER_TIP];
+
+  if (!thumbTip || !indexTip) {
+    return { isPinching: false, distance: Infinity, pinchStrength: 0 };
+  }
+
+  const distance = calculateDistance(thumbTip, indexTip);
+  const isPinching = distance < threshold;
+  
+  // Pinch strength: 0 (far apart) to 1 (touching)
+  // Normalize based on threshold (closer = stronger)
+  const pinchStrength = Math.max(0, Math.min(1, 1 - (distance / threshold)));
+
+  return { isPinching, distance, pinchStrength };
+};
+
 export function HandTracking() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -192,19 +233,32 @@ export function HandTracking() {
 
           canvasCtx.save();
           canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+          
+          // Flip horizontally (mirror mode) - translate to right edge, then scale x by -1
+          canvasCtx.translate(canvas.width, 0);
+          canvasCtx.scale(-1, 1);
+          
+          // Draw the video image (will be flipped by the transformation)
           canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
           if (results.multiHandLandmarks) {
             for (const landmarks of results.multiHandLandmarks) {
-              // Use our custom drawing functions with HAND_CONNECTIONS
+              // Detect pinch for this hand
+              const pinch = detectPinch(landmarks, 0.05);
+              
+              // Change color based on pinch state
+              const connectorColor = pinch.isPinching ? '#FFFF00' : '#00FF00'; // Yellow when pinching, green otherwise
+              const landmarkColor = pinch.isPinching ? '#FF00FF' : '#FF0000'; // Magenta when pinching, red otherwise
+              
+              // Draw landmarks (will be flipped by the canvas transformation)
               drawConnectors(
                 canvasCtx,
                 landmarks,
                 HandsClass.HAND_CONNECTIONS || HAND_CONNECTIONS,
-                { color: '#00FF00', lineWidth: 5 }
+                { color: connectorColor, lineWidth: 5 }
               );
               drawLandmarks(canvasCtx, landmarks, {
-                color: '#FF0000',
+                color: landmarkColor,
                 lineWidth: 2,
                 radius: 3,
               });
