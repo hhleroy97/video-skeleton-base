@@ -73,7 +73,7 @@ const detectPinch = (
   isPinching: boolean;
   distance: number;
   pinchStrength: number;
-  vector?: { x: number; y: number; z: number; dx: number; dy: number; dz: number };
+  vector?: { x: number; y: number; dx: number; dy: number };
 } => {
   if (!landmarks || landmarks.length < 21) {
     return { isPinching: false, distance: Infinity, pinchStrength: 0 };
@@ -301,7 +301,7 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
 
           let pinchVector: PinchVector | null = null;
           let pinchPosition: { x: number; y: number } | null = null; // Actual pinch position for drawing
-          let originalDirection: { dx: number; dy: number; dz: number } | null = null; // Original direction for drawing
+          let originalDirection: { dx: number; dy: number } | null = null; // Original direction for drawing
 
           if (results.multiHandLandmarks) {
             

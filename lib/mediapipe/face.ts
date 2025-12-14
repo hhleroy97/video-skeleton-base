@@ -87,7 +87,7 @@ export async function createFaceDetector(config: FaceDetectorConfig = {}) {
   }
   
   const faceMesh = new FaceMesh({
-    locateFile: (file) => {
+    locateFile: (file: string) => {
       return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
     },
   });

@@ -58,7 +58,7 @@ export function SkeletonOverlay({
   // Load drawing utils on mount
   useEffect(() => {
     loadDrawingUtils().then((utils) => {
-      if (utils.drawConnectors && utils.drawLandmarks) {
+      if (utils && utils.drawConnectors !== null && utils.drawLandmarks !== null) {
         drawingUtilsRef.current = utils;
         setDrawingUtilsLoaded(true);
       }

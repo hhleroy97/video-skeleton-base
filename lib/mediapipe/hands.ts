@@ -99,7 +99,7 @@ export async function createHandsDetector(config: HandsDetectorConfig = {}) {
   }
   
   const hands = new Hands({
-    locateFile: (file) => {
+    locateFile: (file: string) => {
       return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     },
   });
