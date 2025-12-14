@@ -10,6 +10,8 @@ export default function HandsPage() {
   const [pinchVector, setPinchVector] = useState<PinchVector | null>(null);
   const [finalVector, setFinalVector] = useState<FinalVector | null>(null);
   const [currentVector, setCurrentVector] = useState<FinalVector | null>(null);
+  const [phaseAngles, setPhaseAngles] = useState<number[]>([]);
+  const [rightHandDistance, setRightHandDistance] = useState<number | null>(null);
   
   // Track pinch history - only start and end points
   usePinchHistory(pinchVector, {
@@ -28,22 +30,71 @@ export default function HandsPage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Camera Feed</CardTitle>
-              <CardDescription>
-                Hand skeleton tracking overlay. Pinch your thumb and index finger together to control the visual.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="relative">
-                <HandTracking 
-                  onPinchVector={setPinchVector}
-                  compositeVector={currentVector || finalVector}
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Camera Feed</CardTitle>
+                <CardDescription>
+                  Hand skeleton tracking overlay. Pinch your thumb and index finger together to control the visual.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="relative">
+                  <HandTracking 
+                    onPinchVector={setPinchVector}
+                    compositeVector={currentVector || finalVector}
+                    onRightHandDistance={setRightHandDistance}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+            
+            {/* Display transformation values underneath camera */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Transformation Data</CardTitle>
+                <CardDescription>
+                  Real-time values from hand tracking
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">3D Model Phase Angles</h3>
+                    <div className="space-y-1 font-mono text-xs">
+                      {phaseAngles.length > 0 ? (
+                        phaseAngles.map((angle, index) => (
+                          <div key={index} className="flex justify-between">
+                            <span>Orbit {index + 1}:</span>
+                            <span>{angle.toFixed(3)} rad ({(angle * 180 / Math.PI).toFixed(1)}°)</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-gray-500">No phase angles yet</div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Right Hand Distance</h3>
+                    <div className="font-mono text-xs">
+                      {rightHandDistance !== null ? (
+                        <div>
+                          <div className="mb-1">
+                            <span className="font-semibold">Distance:</span> {rightHandDistance.toFixed(4)}
+                          </div>
+                          <div className="text-gray-500 text-xs">
+                            (between thumb and index finger)
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-gray-500">Right hand not detected</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
           <Card>
             <CardHeader>
@@ -53,7 +104,7 @@ export default function HandsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <PinchControlled3D vector={pinchVector} />
+              <PinchControlled3D vector={pinchVector} onPhaseAnglesChange={setPhaseAngles} />
             </CardContent>
           </Card>
         </div>

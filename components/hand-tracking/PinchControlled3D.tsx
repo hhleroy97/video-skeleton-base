@@ -9,12 +9,13 @@ import type { PinchVector } from './HandTracking';
 interface PinchControlled3DProps {
   vector: PinchVector | null;
   className?: string;
+  onPhaseAnglesChange?: (phaseAngles: number[]) => void; // Callback to report phase angles
 }
 
 /**
  * Voronoi-connected orbital system with toon-shaded voxel elements and wireframes
  */
-function VoronoiOrbitalSystem({ vector, nodesPerOrbit }: { vector: PinchVector | null; nodesPerOrbit: number }) {
+function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { vector: PinchVector | null; nodesPerOrbit: number; onPhaseAnglesChange?: (phaseAngles: number[]) => void }) {
   const groupRef = useRef<THREE.Group>(null);
   const previousVectorRef = useRef<{ x: number; y: number } | null>(null);
   const phaseAnglesRef = useRef<Array<number>>([]);
@@ -172,10 +173,6 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit }: { vector: PinchVector |
     
     // ONLY update phase angles based on movement - nothing else
     if (vector) {
-      // Debug: log when we have a vector
-      if (!previousVectorRef.current) {
-        console.log('VoronoiOrbitalSystem: Starting to track vector', { x: vector.x.toFixed(3), y: vector.y.toFixed(3) });
-      }
       if (previousVectorRef.current) {
         const deltaX = vector.x - previousVectorRef.current.x;
         const deltaY = vector.y - previousVectorRef.current.y;
@@ -191,6 +188,11 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit }: { vector: PinchVector |
             
             // Accumulate phase angle directly
             phaseAnglesRef.current[orbit] += phaseChange;
+          }
+          
+          // Report phase angles to parent
+          if (onPhaseAnglesChange) {
+            onPhaseAnglesChange([...phaseAnglesRef.current]);
           }
         }
       }
@@ -380,6 +382,7 @@ function CameraController({
 export function PinchControlled3D({
   vector,
   className = '',
+  onPhaseAnglesChange,
 }: PinchControlled3DProps) {
   const [cameraX, setCameraX] = useState(0);
   const [cameraY, setCameraY] = useState(-4);
@@ -410,7 +413,7 @@ export function PinchControlled3D({
           <pointLight position={[0, 5, 0]} intensity={0.8} color="#ffaaff" />
           
           {/* Voronoi orbital system */}
-          <VoronoiOrbitalSystem vector={vector} nodesPerOrbit={nodesPerOrbit} />
+          <VoronoiOrbitalSystem vector={vector} nodesPerOrbit={nodesPerOrbit} onPhaseAnglesChange={onPhaseAnglesChange} />
           
           {/* Orbit controls for manual camera movement */}
           <OrbitControls

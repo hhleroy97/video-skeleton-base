@@ -109,9 +109,10 @@ export interface PinchVector {
 export interface HandTrackingProps {
   onPinchVector?: (vector: PinchVector | null) => void;
   compositeVector?: FinalVector | null; // Composite vector to draw on canvas
+  onRightHandDistance?: (distance: number | null) => void; // Distance between thumb and index on right hand
 }
 
-export function HandTracking({ onPinchVector, compositeVector }: HandTrackingProps = {}) {
+export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance }: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeVectorRef = useRef<FinalVector | null>(null);
@@ -266,12 +267,26 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
           throw new Error('Hands is not a constructor');
         }
 
-        // Initialize Hands
-        handsInstance = new HandsClass({
-          locateFile: (file: string) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-          },
-        });
+        // Initialize Hands with proper module configuration
+        try {
+          handsInstance = new HandsClass({
+            locateFile: (file: string) => {
+              return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            },
+            // Suppress Emscripten warnings about Module.arguments
+            onRuntimeInitialized: () => {
+              console.log('MediaPipe Hands runtime initialized');
+            },
+          });
+        } catch (err: any) {
+          // If initialization fails, try without onRuntimeInitialized
+          console.warn('Initial Hands initialization failed, retrying:', err);
+          handsInstance = new HandsClass({
+            locateFile: (file: string) => {
+              return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            },
+          });
+        }
 
         handsInstance.setOptions({
           maxNumHands: 2,
@@ -329,10 +344,6 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
             // This ensures control always works
             const handToUse = leftHand || hands[0];
             
-            // Debug: log which hand we're using
-            if (handToUse && hands.length > 0) {
-              console.log('Using hand for control:', handToUse.handedness, 'out of', hands.length, 'detected hands');
-            }
             
             // Only use left hand for 3D control (or first hand if no left hand detected)
             if (handToUse) {
@@ -396,6 +407,61 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
               });
             }
             
+            // Draw circle between thumb and index finger of the other hand (right hand)
+            // Find right hand: explicitly Right, or if 2 hands and one is Left, use the other one
+            let rightHand = hands.find((hand: any) => hand.handedness === 'Right');
+            
+            // Fallback: if we have 2 hands and one is the left hand (used for control), 
+            // the other one should be the right hand
+            if (!rightHand && hands.length === 2 && handToUse) {
+              rightHand = hands.find((hand: any) => hand !== handToUse);
+            }
+            
+            // Another fallback: if we have 2 hands and handedness is Unknown, use the second hand
+            if (!rightHand && hands.length === 2 && handToUse === hands[0]) {
+              rightHand = hands[1];
+            }
+            
+            if (rightHand) {
+              const thumbTip = rightHand.landmarks[THUMB_TIP];
+              const indexTip = rightHand.landmarks[INDEX_FINGER_TIP];
+              
+              if (thumbTip && indexTip) {
+                // Calculate distance between thumb and index finger (normalized 0-1)
+                const distance = calculateDistance(thumbTip, indexTip);
+                
+                // Report distance to parent component
+                if (onRightHandDistance) {
+                  onRightHandDistance(distance);
+                }
+                
+                // Calculate midpoint between thumb and index finger
+                // Canvas transformation already handles flipping, so use original coordinates
+                const midX = ((thumbTip.x + indexTip.x) / 2) * canvas.width;
+                const midY = ((thumbTip.y + indexTip.y) / 2) * canvas.height;
+                
+                // Calculate distance in pixels for circle radius
+                const dx = (indexTip.x - thumbTip.x) * canvas.width;
+                const dy = (indexTip.y - thumbTip.y) * canvas.height;
+                const radius = Math.sqrt(dx * dx + dy * dy) / 2;
+                
+                // Only draw if radius is reasonable (fingers are separated)
+                if (radius > 5) {
+                  // Draw circle with border and no fill - make it more visible
+                  canvasCtx.strokeStyle = '#00FFFF'; // Cyan border for visibility
+                  canvasCtx.lineWidth = 3; // Thicker line
+                  canvasCtx.beginPath();
+                  canvasCtx.arc(midX, midY, radius, 0, 2 * Math.PI);
+                  canvasCtx.stroke();
+                }
+              }
+            } else {
+              // No right hand detected
+              if (onRightHandDistance) {
+                onRightHandDistance(null);
+              }
+            }
+            
             // Draw vector lines on the canvas when pinching
             // Use actual pinch position calculated from landmarks
             if (pinchPosition && pinchVector && originalDirection) {
@@ -445,10 +511,6 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
           // Call callback with vector (or null if not pinching)
           if (onPinchVector) {
             onPinchVector(pinchVector);
-            // Debug: log when vector changes
-            if (pinchVector) {
-              console.log('Sending pinch vector:', { x: pinchVector.x.toFixed(3), y: pinchVector.y.toFixed(3) });
-            }
           }
           
           // Draw composite vector LAST so it appears on top of everything
