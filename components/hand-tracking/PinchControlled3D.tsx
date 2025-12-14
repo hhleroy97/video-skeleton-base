@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useMemo, useState } from 'react';
+import { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
@@ -9,6 +9,7 @@ import type { PinchVector } from './HandTracking';
 interface PinchControlled3DProps {
   vector: PinchVector | null;
   className?: string;
+  nodesPerOrbit?: number; // Number of nodes per layer (controlled by right hand distance)
   onPhaseAnglesChange?: (phaseAngles: number[]) => void; // Callback to report phase angles
 }
 
@@ -69,20 +70,20 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
       }
     }
     
-    // Create cosmic connections - ensure all nodes have multiple connections
+    // Create cosmic connections - reduced number of connections
     nodes.forEach((node, i) => {
       const connections: number[] = [];
       
-      // Connect to nodes in same orbit (adjacent nodes)
+      // Connect to nodes in same orbit (only immediate neighbors)
       const sameOrbitNodes = nodes.filter((n, idx) => 
         n.orbitIndex === node.orbitIndex && idx !== i
       );
-      // Connect to 2-3 adjacent nodes in same orbit
-      const adjacentCount = Math.min(3, sameOrbitNodes.length);
+      // Connect to only 1-2 closest adjacent nodes in same orbit
+      const adjacentCount = Math.min(2, sameOrbitNodes.length);
       for (let j = 0; j < adjacentCount; j++) {
         const angleDiff = Math.abs(node.angle - sameOrbitNodes[j].angle);
         const normalizedDiff = Math.min(angleDiff, Math.PI * 2 - angleDiff);
-        if (normalizedDiff < Math.PI / 2) { // Within 90 degrees
+        if (normalizedDiff < Math.PI / 3) { // Within 60 degrees (stricter)
           const otherIdx = nodes.indexOf(sameOrbitNodes[j]);
           if (otherIdx !== -1 && !connections.includes(otherIdx)) {
             connections.push(otherIdx);
@@ -90,16 +91,16 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
         }
       }
       
-      // Connect to nodes in adjacent orbits
+      // Connect to nodes in adjacent orbits (stricter distance threshold)
       nodes.forEach((other, j) => {
-        if (i !== j && Math.abs(other.orbitIndex - node.orbitIndex) <= 1) {
+        if (i !== j && Math.abs(other.orbitIndex - node.orbitIndex) === 1) {
           const dx = node.radius * Math.cos(node.angle) - other.radius * Math.cos(other.angle);
           const dy = node.height - other.height;
           const dz = node.radius * Math.sin(node.angle) - other.radius * Math.sin(other.angle);
           const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
           
-          // Connect if within threshold or in adjacent orbit
-          if (dist < 1.2 || Math.abs(other.orbitIndex - node.orbitIndex) === 1) {
+          // Connect only if within stricter threshold
+          if (dist < 0.8) {
             if (!connections.includes(j)) {
               connections.push(j);
             }
@@ -107,8 +108,8 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
         }
       });
       
-      // Ensure each node has at least 3 connections
-      if (connections.length < 3) {
+      // Ensure each node has at least 2 connections (reduced from 3)
+      if (connections.length < 2) {
         // Add more connections to nearest nodes
         const distances = nodes.map((other, j) => {
           if (i === j || connections.includes(j)) return { idx: j, dist: Infinity };
@@ -119,9 +120,9 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
           return { idx: j, dist };
         });
         distances.sort((a, b) => a.dist - b.dist);
-        const needed = 3 - connections.length;
+        const needed = 2 - connections.length;
         for (let k = 0; k < needed && k < distances.length; k++) {
-          if (distances[k].dist < Infinity) {
+          if (distances[k].dist < Infinity && distances[k].dist < 1.0) {
             connections.push(distances[k].idx);
           }
         }
@@ -382,6 +383,7 @@ function CameraController({
 export function PinchControlled3D({
   vector,
   className = '',
+  nodesPerOrbit: externalNodesPerOrbit = 8,
   onPhaseAnglesChange,
 }: PinchControlled3DProps) {
   const [cameraX, setCameraX] = useState(0);
@@ -390,7 +392,12 @@ export function PinchControlled3D({
   const [rotationX, setRotationX] = useState(Math.PI / 2); // 90 degrees
   const [rotationY, setRotationY] = useState(0);
   const [rotationZ, setRotationZ] = useState(0);
-  const [nodesPerOrbit, setNodesPerOrbit] = useState(8);
+  const [nodesPerOrbit, setNodesPerOrbit] = useState(externalNodesPerOrbit);
+  
+  // Update nodes per orbit when external value changes
+  useEffect(() => {
+    setNodesPerOrbit(externalNodesPerOrbit);
+  }, [externalNodesPerOrbit]);
   
   return (
     <div className={`w-full ${className}`}>
@@ -536,7 +543,7 @@ export function PinchControlled3D({
            <div className="space-y-2">
              <div>
                <label className="block text-xs text-gray-400 mb-1">
-                 Nodes per Layer: {nodesPerOrbit}
+                 Nodes per Layer: {nodesPerOrbit} (controlled by right hand distance)
                </label>
                <input
                  type="range"
@@ -544,8 +551,9 @@ export function PinchControlled3D({
                  max="10"
                  step="1"
                  value={nodesPerOrbit}
-                 onChange={(e) => setNodesPerOrbit(parseInt(e.target.value))}
-                 className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                 disabled
+                 readOnly
+                 className="w-full h-2 bg-gray-700 rounded-lg appearance-none accent-purple-500 opacity-50"
                />
              </div>
            </div>

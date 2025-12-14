@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { HandTracking, type PinchVector } from '@/components/hand-tracking/HandTracking';
 import { usePinchHistory, type FinalVector } from '@/components/hand-tracking/PinchHistoryTracker';
 import { PinchControlled3D } from '@/components/hand-tracking/PinchControlled3D';
@@ -12,12 +12,29 @@ export default function HandsPage() {
   const [currentVector, setCurrentVector] = useState<FinalVector | null>(null);
   const [phaseAngles, setPhaseAngles] = useState<number[]>([]);
   const [rightHandDistance, setRightHandDistance] = useState<number | null>(null);
+  const [nodesPerOrbit, setNodesPerOrbit] = useState(8);
   
   // Track pinch history - only start and end points
   usePinchHistory(pinchVector, {
     onFinalVector: setFinalVector, // Set when pinch is released
     onCurrentVector: setCurrentVector, // Update continuously while pinching
   });
+  
+  // Update nodes per orbit based on right hand distance
+  // Distance is normalized 0-1, but map 0-0.25 range to 3-10 nodes
+  // Larger distance (fingers farther apart) = more nodes
+  useEffect(() => {
+    if (rightHandDistance !== null) {
+      // Map distance (0-0.25) to nodes (3-10)
+      // Clamp distance to 0-0.25 range
+      const clampedDistance = Math.min(0.25, Math.max(0, rightHandDistance));
+      // Map from 0-0.25 to 3-10
+      const minNodes = 3;
+      const maxNodes = 10;
+      const mappedNodes = Math.round(minNodes + (clampedDistance / 0.25) * (maxNodes - minNodes));
+      setNodesPerOrbit(mappedNodes);
+    }
+  }, [rightHandDistance]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-8 lg:p-24">
@@ -104,7 +121,7 @@ export default function HandsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <PinchControlled3D vector={pinchVector} onPhaseAnglesChange={setPhaseAngles} />
+              <PinchControlled3D vector={pinchVector} nodesPerOrbit={nodesPerOrbit} onPhaseAnglesChange={setPhaseAngles} />
             </CardContent>
           </Card>
         </div>
