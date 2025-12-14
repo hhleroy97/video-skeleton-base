@@ -22,8 +22,12 @@ export function PinchVisual({
     if (!containerRef.current || !vector) return;
 
     const container = containerRef.current;
-    const x = vector.x * container.offsetWidth;
-    const y = vector.y * container.offsetHeight;
+    const centerX = container.offsetWidth / 2;
+    const centerY = container.offsetHeight / 2;
+    // Convert center-origin coordinates to pixel coordinates
+    // vector.x and vector.y are in range -0.5 to 0.5 with (0,0) at center
+    const x = centerX + vector.x * container.offsetWidth;
+    const y = centerY + vector.y * container.offsetHeight;
 
     // Update visual position
     const visual = container.querySelector('.pinch-visual-element') as HTMLElement;

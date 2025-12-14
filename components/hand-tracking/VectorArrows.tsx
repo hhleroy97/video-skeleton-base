@@ -56,8 +56,8 @@ export function VectorArrows({ vector, scale = 50 }: VectorArrowsProps) {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Position Vectors (x, y, z) */}
+    <div>
+      {/* Position Vectors (x, y) */}
       <div>
         <h4 className="text-sm font-semibold mb-2">Position Vectors</h4>
         <svg width="200" height="200" className="border border-gray-300 rounded bg-gray-50">
@@ -82,22 +82,13 @@ export function VectorArrows({ vector, scale = 50 }: VectorArrowsProps) {
             >
               <polygon points="0 0, 10 3, 0 6" fill="#22c55e" />
             </marker>
-            <marker
-              id="arrowhead-blue"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-            >
-              <polygon points="0 0, 10 3, 0 6" fill="#3b82f6" />
-            </marker>
           </defs>
           {/* X axis (red) - horizontal */}
+          {/* vector.x is in center-origin: -0.5 to 0.5, where 0 is center */}
           {drawArrow(
             centerX,
             centerY,
-            centerX + vector.x * scale,
+            centerX + vector.x * scale * 2,
             centerY,
             '#ef4444',
             'X',
@@ -108,91 +99,10 @@ export function VectorArrows({ vector, scale = 50 }: VectorArrowsProps) {
             centerX,
             centerY,
             centerX,
-            centerY - vector.y * scale,
+            centerY - vector.y * scale * 2,
             '#22c55e',
             'Y',
             'arrowhead-green'
-          )}
-          {/* Z axis (blue) - depth (diagonal) */}
-          {drawArrow(
-            centerX,
-            centerY,
-            centerX + vector.z * scale * 0.7,
-            centerY + vector.z * scale * 0.7,
-            '#3b82f6',
-            'Z',
-            'arrowhead-blue'
-          )}
-          {/* Center point */}
-          <circle cx={centerX} cy={centerY} r="3" fill="#000" />
-        </svg>
-      </div>
-
-      {/* Direction Vectors (dx, dy, dz) */}
-      <div>
-        <h4 className="text-sm font-semibold mb-2">Direction Vectors</h4>
-        <svg width="200" height="200" className="border border-gray-300 rounded bg-gray-50">
-          <defs>
-            <marker
-              id="arrowhead-dx-red"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-            >
-              <polygon points="0 0, 10 3, 0 6" fill="#dc2626" />
-            </marker>
-            <marker
-              id="arrowhead-dy-green"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-            >
-              <polygon points="0 0, 10 3, 0 6" fill="#16a34a" />
-            </marker>
-            <marker
-              id="arrowhead-dz-blue"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-            >
-              <polygon points="0 0, 10 3, 0 6" fill="#2563eb" />
-            </marker>
-          </defs>
-          {/* dX axis (darker red) - horizontal */}
-          {drawArrow(
-            centerX,
-            centerY,
-            centerX + vector.dx * scale,
-            centerY,
-            '#dc2626',
-            'dX',
-            'arrowhead-dx-red'
-          )}
-          {/* dY axis (darker green) - vertical (inverted for screen coordinates) */}
-          {drawArrow(
-            centerX,
-            centerY,
-            centerX,
-            centerY - vector.dy * scale,
-            '#16a34a',
-            'dY',
-            'arrowhead-dy-green'
-          )}
-          {/* dZ axis (darker blue) - depth (diagonal) */}
-          {drawArrow(
-            centerX,
-            centerY,
-            centerX + vector.dz * scale * 0.7,
-            centerY + vector.dz * scale * 0.7,
-            '#2563eb',
-            'dZ',
-            'arrowhead-dz-blue'
           )}
           {/* Center point */}
           <circle cx={centerX} cy={centerY} r="3" fill="#000" />

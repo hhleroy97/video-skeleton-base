@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { FinalVector } from './PinchHistoryTracker';
 
 // Hand connections based on MediaPipe hand landmarks (21 points)
 const HAND_CONNECTIONS: Array<[number, number]> = [
@@ -34,33 +35,33 @@ const calculateDistance = (point1: any, point2: any): number => {
 };
 
 // Calculate pinch vector (position and direction)
+// Coordinates are in center-origin system: (0,0) is at center, range is -0.5 to 0.5
 const calculatePinchVector = (
   thumbTip: any,
   indexTip: any
-): { x: number; y: number; z: number; dx: number; dy: number; dz: number } => {
-  // Position: midpoint between thumb and index finger
-  const x = (thumbTip.x + indexTip.x) / 2;
-  const y = (thumbTip.y + indexTip.y) / 2;
-  const z = ((thumbTip.z || 0) + (indexTip.z || 0)) / 2;
+): { x: number; y: number; dx: number; dy: number } => {
+  // Position: midpoint between thumb and index finger (normalized 0-1, top-left origin)
+  const xNormalized = (thumbTip.x + indexTip.x) / 2;
+  const yNormalized = (thumbTip.y + indexTip.y) / 2;
+  
+  // Convert to center-origin: (0,0) at center, range -0.5 to 0.5
+  const x = xNormalized - 0.5;
+  const y = yNormalized - 0.5;
   
   // Direction vector: from thumb to index finger (normalized)
   const dx = indexTip.x - thumbTip.x;
   const dy = indexTip.y - thumbTip.y;
-  const dz = (indexTip.z || 0) - (thumbTip.z || 0);
-  const magnitude = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const magnitude = Math.sqrt(dx * dx + dy * dy);
   
   // Normalize direction vector
   const normalizedDx = magnitude > 0 ? dx / magnitude : 0;
   const normalizedDy = magnitude > 0 ? dy / magnitude : 0;
-  const normalizedDz = magnitude > 0 ? dz / magnitude : 0;
   
   return {
     x,
     y,
-    z,
     dx: normalizedDx,
     dy: normalizedDy,
-    dz: normalizedDz,
   };
 };
 
@@ -101,23 +102,28 @@ const detectPinch = (
 export interface PinchVector {
   x: number; // Position X (normalized 0-1)
   y: number; // Position Y (normalized 0-1)
-  z: number; // Position Z (depth)
   dx: number; // Direction X (normalized)
   dy: number; // Direction Y (normalized)
-  dz: number; // Direction Z (normalized)
 }
 
 export interface HandTrackingProps {
   onPinchVector?: (vector: PinchVector | null) => void;
+  compositeVector?: FinalVector | null; // Composite vector to draw on canvas
 }
 
-export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
+export function HandTracking({ onPinchVector, compositeVector }: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const compositeVectorRef = useRef<FinalVector | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
   const [initFunction, setInitFunction] = useState<(() => Promise<void>) | null>(null);
+  
+  // Keep compositeVector ref up to date
+  useEffect(() => {
+    compositeVectorRef.current = compositeVector || null;
+  }, [compositeVector]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -293,10 +299,11 @@ export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
           // Draw the video image (will be flipped by the transformation)
           canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
+          let pinchVector: PinchVector | null = null;
+          let pinchPosition: { x: number; y: number } | null = null; // Actual pinch position for drawing
+          let originalDirection: { dx: number; dy: number; dz: number } | null = null; // Original direction for drawing
+
           if (results.multiHandLandmarks) {
-            let pinchVector: PinchVector | null = null;
-            let pinchPosition: { x: number; y: number } | null = null; // Actual pinch position for drawing
-            let originalDirection: { dx: number; dy: number; dz: number } | null = null; // Original direction for drawing
             
             for (const landmarks of results.multiHandLandmarks) {
               // Detect pinch for this hand
@@ -305,12 +312,16 @@ export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
               // Track vector from first hand
               if (pinch.vector && !pinchVector) {
                 // Calculate actual pinch position from landmarks (midpoint of thumb and index)
+                // Convert from center-origin to pixel coordinates
                 const thumbTip = landmarks[THUMB_TIP];
                 const indexTip = landmarks[INDEX_FINGER_TIP];
                 if (thumbTip && indexTip) {
+                  const centerX = canvas.width / 2;
+                  const centerY = canvas.height / 2;
+                  // Convert center-origin coordinates to pixel coordinates
                   pinchPosition = {
-                    x: ((thumbTip.x + indexTip.x) / 2) * canvas.width,
-                    y: ((thumbTip.y + indexTip.y) / 2) * canvas.height,
+                    x: centerX + pinch.vector.x * canvas.width,
+                    y: centerY + pinch.vector.y * canvas.height,
                   };
                 }
                 
@@ -318,13 +329,13 @@ export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
                 originalDirection = {
                   dx: pinch.vector.dx,
                   dy: pinch.vector.dy,
-                  dz: pinch.vector.dz,
                 };
                 
                 // Flip x coordinate for callback (since canvas is flipped)
+                // In center-origin: flip x means negate it
                 pinchVector = {
                   ...pinch.vector,
-                  x: 1 - pinch.vector.x,
+                  x: -pinch.vector.x,
                   dx: -pinch.vector.dx, // Also flip direction
                 };
               }
@@ -352,7 +363,6 @@ export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
             if (pinchPosition && pinchVector && originalDirection) {
               const vectorX = pinchPosition.x;
               const vectorY = pinchPosition.y;
-              const vectorZ = pinchVector.z * canvas.width; // Scale Z for visibility
               
               // Draw position vector (from center to pinch position)
               const centerX = canvas.width / 2;
@@ -374,42 +384,6 @@ export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
               canvasCtx.lineTo(centerX, vectorY);
               canvasCtx.stroke();
               
-              // Position vector: Z component (blue) - diagonal
-              canvasCtx.strokeStyle = '#3b82f6';
-              canvasCtx.beginPath();
-              canvasCtx.moveTo(centerX, centerY);
-              canvasCtx.lineTo(centerX + vectorZ * 0.5, centerY + vectorZ * 0.5);
-              canvasCtx.stroke();
-              
-              // Draw direction vector (from pinch position)
-              const directionLength = 100; // Length of direction arrow
-              
-              // Direction vector: dX component (darker red)
-              canvasCtx.strokeStyle = '#dc2626';
-              canvasCtx.lineWidth = 2;
-              canvasCtx.setLineDash([5, 5]);
-              canvasCtx.beginPath();
-              canvasCtx.moveTo(vectorX, vectorY);
-              canvasCtx.lineTo(vectorX + originalDirection.dx * directionLength, vectorY);
-              canvasCtx.stroke();
-              
-              // Direction vector: dY component (darker green)
-              canvasCtx.strokeStyle = '#16a34a';
-              canvasCtx.beginPath();
-              canvasCtx.moveTo(vectorX, vectorY);
-              canvasCtx.lineTo(vectorX, vectorY - originalDirection.dy * directionLength);
-              canvasCtx.stroke();
-              
-              // Direction vector: dZ component (darker blue) - diagonal
-              canvasCtx.strokeStyle = '#2563eb';
-              canvasCtx.beginPath();
-              canvasCtx.moveTo(vectorX, vectorY);
-              canvasCtx.lineTo(
-                vectorX + originalDirection.dz * directionLength * 0.7,
-                vectorY + originalDirection.dz * directionLength * 0.7
-              );
-              canvasCtx.stroke();
-              
               // Draw pinch position point (exactly where user is pinching)
               canvasCtx.fillStyle = '#FFFF00';
               canvasCtx.beginPath();
@@ -428,17 +402,87 @@ export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
               // Reset line style
               canvasCtx.setLineDash([]);
             }
+          }
+          
+          // Call callback with vector (or null if not pinching)
+          if (onPinchVector) {
+            onPinchVector(pinchVector);
+          }
+          
+          // Draw composite vector LAST so it appears on top of everything
+          // Note: Canvas is flipped horizontally, so coordinates need to account for the transformation
+          const currentCompositeVector = compositeVectorRef.current;
+          if (currentCompositeVector) {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
             
-            // Call callback with vector (or null if not pinching)
-            if (onPinchVector) {
-              onPinchVector(pinchVector);
-            }
-          } else {
-            // No hands detected
-            if (onPinchVector) {
-              onPinchVector(null);
+            // Convert center-origin coordinates to canvas pixel coordinates
+            // The canvas is flipped horizontally, so we need to account for that
+            // Canvas transformation: translate(width, 0) then scale(-1, 1)
+            // This means: screenX = width - canvasX, so canvasX = width - screenX
+            // The compositeVector coordinates come from pinchVector which has X already flipped (negated) for the callback
+            // So compositeVector.startX = -originalX where originalX is the center-origin coordinate
+            // For screen position: screenX = centerX + originalX * width = centerX - compositeVector.startX * width
+            // For canvas position (accounting for flip): canvasX = width - screenX = width - (centerX - compositeVector.startX * width)
+            // = width - centerX + compositeVector.startX * width = centerX + compositeVector.startX * width
+            // But since canvas is flipped, we need to flip X again: canvasX = centerX - compositeVector.startX * width
+            const startX = centerX - currentCompositeVector.startX * canvas.width;
+            const startY = centerY + currentCompositeVector.startY * canvas.height;
+            const endX = centerX - currentCompositeVector.endX * canvas.width;
+            const endY = centerY + currentCompositeVector.endY * canvas.height;
+            
+            // Make sure coordinates are valid and within canvas bounds
+            if (!isNaN(startX) && !isNaN(startY) && !isNaN(endX) && !isNaN(endY)) {
+              // Draw composite vector (from start to end) - thick purple line
+              canvasCtx.strokeStyle = '#9333ea'; // Purple
+              canvasCtx.lineWidth = 6;
+              canvasCtx.setLineDash([]);
+              canvasCtx.lineCap = 'round';
+              canvasCtx.lineJoin = 'round';
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(startX, startY);
+              canvasCtx.lineTo(endX, endY);
+              canvasCtx.stroke();
+              
+              // Draw arrowhead at the end
+              const angle = Math.atan2(endY - startY, endX - startX);
+              const arrowLength = 25;
+              
+              canvasCtx.strokeStyle = '#9333ea';
+              canvasCtx.lineWidth = 6;
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(endX, endY);
+              canvasCtx.lineTo(
+                endX - arrowLength * Math.cos(angle - Math.PI / 6),
+                endY - arrowLength * Math.sin(angle - Math.PI / 6)
+              );
+              canvasCtx.moveTo(endX, endY);
+              canvasCtx.lineTo(
+                endX - arrowLength * Math.cos(angle + Math.PI / 6),
+                endY - arrowLength * Math.sin(angle + Math.PI / 6)
+              );
+              canvasCtx.stroke();
+              
+              // Draw start point (red circle)
+              canvasCtx.fillStyle = '#ef4444'; // Red
+              canvasCtx.beginPath();
+              canvasCtx.arc(startX, startY, 10, 0, 2 * Math.PI);
+              canvasCtx.fill();
+              canvasCtx.strokeStyle = '#ffffff';
+              canvasCtx.lineWidth = 2;
+              canvasCtx.stroke();
+              
+              // Draw end point (green circle)
+              canvasCtx.fillStyle = '#22c55e'; // Green
+              canvasCtx.beginPath();
+              canvasCtx.arc(endX, endY, 10, 0, 2 * Math.PI);
+              canvasCtx.fill();
+              canvasCtx.strokeStyle = '#ffffff';
+              canvasCtx.lineWidth = 2;
+              canvasCtx.stroke();
             }
           }
+          
           canvasCtx.restore();
         });
 
