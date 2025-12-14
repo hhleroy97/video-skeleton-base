@@ -21,6 +21,7 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
   const groupRef = useRef<THREE.Group>(null);
   const previousVectorRef = useRef<{ x: number; y: number } | null>(null);
   const phaseAnglesRef = useRef<Array<number>>([]);
+  const targetPhaseAnglesRef = useRef<Array<number>>([]); // Target phase angles for smooth interpolation
   const nodesRef = useRef<Array<{
     id: number;
     orbitIndex: number;
@@ -35,6 +36,7 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
   const numOrbits = 5;
   const orbitRadius = 1.5;
   const voxelSize = 0.12;
+  const lagFactor = 0.15; // Smoothing factor (0.1 = very smooth/slow, 0.3 = more responsive)
   
   // Create orbital nodes with Voronoi-like connections
   const orbitalNodes = useMemo(() => {
@@ -134,7 +136,9 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
     
     nodesRef.current = nodes;
     // Initialize phase angles for each orbit (starting with offsets)
-    phaseAnglesRef.current = Array(numOrbits).fill(0).map((_, i) => (i / numOrbits) * Math.PI * 2);
+    const initialPhases = Array(numOrbits).fill(0).map((_, i) => (i / numOrbits) * Math.PI * 2);
+    phaseAnglesRef.current = initialPhases;
+    targetPhaseAnglesRef.current = [...initialPhases]; // Initialize target to same values
     return nodes;
   }, [nodesPerOrbit]);
   
@@ -173,7 +177,7 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
     
     const group = groupRef.current;
     
-    // ONLY update phase angles based on movement - nothing else
+    // Update target phase angles based on movement (immediate response)
     if (vector) {
       if (previousVectorRef.current) {
         const deltaX = vector.x - previousVectorRef.current.x;
@@ -181,26 +185,35 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
         
         // Only update if there's actual movement
         if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
-          // Update phase angles between layers based on user movement
+          // Update target phase angles between layers based on user movement
           for (let orbit = 0; orbit < numOrbits; orbit++) {
             // Phase angle changes based on movement
             const phaseChange = 
               deltaX * 1.0 * (orbit + 1) + // X movement affects phase
               deltaY * 0.8 * (orbit + 1); // Y movement affects phase
             
-            // Accumulate phase angle directly
-            phaseAnglesRef.current[orbit] += phaseChange;
-          }
-          
-          // Report phase angles to parent
-          if (onPhaseAnglesChange) {
-            onPhaseAnglesChange([...phaseAnglesRef.current]);
+            // Update target phase angle immediately
+            targetPhaseAnglesRef.current[orbit] += phaseChange;
           }
         }
       }
       previousVectorRef.current = { x: vector.x, y: vector.y };
     } else {
       previousVectorRef.current = null;
+    }
+    
+    // Smoothly interpolate phase angles toward target (visual lag)
+    for (let orbit = 0; orbit < numOrbits; orbit++) {
+      phaseAnglesRef.current[orbit] = THREE.MathUtils.lerp(
+        phaseAnglesRef.current[orbit],
+        targetPhaseAnglesRef.current[orbit],
+        lagFactor
+      );
+    }
+    
+    // Report phase angles to parent
+    if (onPhaseAnglesChange) {
+      onPhaseAnglesChange([...phaseAnglesRef.current]);
     }
     
     // Update orbital positions based on phase angles only
