@@ -58,9 +58,9 @@ export function FinalVectorArrows({ vector, scale = 50 }: FinalVectorArrowsProps
 
   // Convert center-origin coordinates to SVG coordinates
   const startX = centerX + vector.startX * scale * 2;
-  const startY = centerY - vector.startY * scale * 2; // Invert Y for screen coordinates
+  const startY = centerY + vector.startY * scale * 2;
   const endX = centerX + vector.endX * scale * 2;
-  const endY = centerY - vector.endY * scale * 2;
+  const endY = centerY + vector.endY * scale * 2;
 
   // Direction vector length based on magnitude
   const directionLength = vector.magnitude * scale * 2;

@@ -94,12 +94,12 @@ export function VectorArrows({ vector, scale = 50 }: VectorArrowsProps) {
             'X',
             'arrowhead-red'
           )}
-          {/* Y axis (green) - vertical (inverted for screen coordinates) */}
+          {/* Y axis (green) - vertical */}
           {drawArrow(
             centerX,
             centerY,
             centerX,
-            centerY - vector.y * scale * 2,
+            centerY + vector.y * scale * 2,
             '#22c55e',
             'Y',
             'arrowhead-green'
