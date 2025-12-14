@@ -33,11 +33,47 @@ const calculateDistance = (point1: any, point2: any): number => {
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 };
 
+// Calculate pinch vector (position and direction)
+const calculatePinchVector = (
+  thumbTip: any,
+  indexTip: any
+): { x: number; y: number; z: number; dx: number; dy: number; dz: number } => {
+  // Position: midpoint between thumb and index finger
+  const x = (thumbTip.x + indexTip.x) / 2;
+  const y = (thumbTip.y + indexTip.y) / 2;
+  const z = ((thumbTip.z || 0) + (indexTip.z || 0)) / 2;
+  
+  // Direction vector: from thumb to index finger (normalized)
+  const dx = indexTip.x - thumbTip.x;
+  const dy = indexTip.y - thumbTip.y;
+  const dz = (indexTip.z || 0) - (thumbTip.z || 0);
+  const magnitude = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  
+  // Normalize direction vector
+  const normalizedDx = magnitude > 0 ? dx / magnitude : 0;
+  const normalizedDy = magnitude > 0 ? dy / magnitude : 0;
+  const normalizedDz = magnitude > 0 ? dz / magnitude : 0;
+  
+  return {
+    x,
+    y,
+    z,
+    dx: normalizedDx,
+    dy: normalizedDy,
+    dz: normalizedDz,
+  };
+};
+
 // Detect pinch gesture (thumb and index finger close together)
 const detectPinch = (
   landmarks: any[],
   threshold: number = 0.05
-): { isPinching: boolean; distance: number; pinchStrength: number } => {
+): {
+  isPinching: boolean;
+  distance: number;
+  pinchStrength: number;
+  vector?: { x: number; y: number; z: number; dx: number; dy: number; dz: number };
+} => {
   if (!landmarks || landmarks.length < 21) {
     return { isPinching: false, distance: Infinity, pinchStrength: 0 };
   }
@@ -56,10 +92,26 @@ const detectPinch = (
   // Normalize based on threshold (closer = stronger)
   const pinchStrength = Math.max(0, Math.min(1, 1 - (distance / threshold)));
 
-  return { isPinching, distance, pinchStrength };
+  // Calculate vector when pinching
+  const vector = isPinching ? calculatePinchVector(thumbTip, indexTip) : undefined;
+
+  return { isPinching, distance, pinchStrength, vector };
 };
 
-export function HandTracking() {
+export interface PinchVector {
+  x: number; // Position X (normalized 0-1)
+  y: number; // Position Y (normalized 0-1)
+  z: number; // Position Z (depth)
+  dx: number; // Direction X (normalized)
+  dy: number; // Direction Y (normalized)
+  dz: number; // Direction Z (normalized)
+}
+
+export interface HandTrackingProps {
+  onPinchVector?: (vector: PinchVector | null) => void;
+}
+
+export function HandTracking({ onPinchVector }: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -242,9 +294,40 @@ export function HandTracking() {
           canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
           if (results.multiHandLandmarks) {
+            let pinchVector: PinchVector | null = null;
+            let pinchPosition: { x: number; y: number } | null = null; // Actual pinch position for drawing
+            let originalDirection: { dx: number; dy: number; dz: number } | null = null; // Original direction for drawing
+            
             for (const landmarks of results.multiHandLandmarks) {
               // Detect pinch for this hand
               const pinch = detectPinch(landmarks, 0.05);
+              
+              // Track vector from first hand
+              if (pinch.vector && !pinchVector) {
+                // Calculate actual pinch position from landmarks (midpoint of thumb and index)
+                const thumbTip = landmarks[THUMB_TIP];
+                const indexTip = landmarks[INDEX_FINGER_TIP];
+                if (thumbTip && indexTip) {
+                  pinchPosition = {
+                    x: ((thumbTip.x + indexTip.x) / 2) * canvas.width,
+                    y: ((thumbTip.y + indexTip.y) / 2) * canvas.height,
+                  };
+                }
+                
+                // Store original direction before flipping
+                originalDirection = {
+                  dx: pinch.vector.dx,
+                  dy: pinch.vector.dy,
+                  dz: pinch.vector.dz,
+                };
+                
+                // Flip x coordinate for callback (since canvas is flipped)
+                pinchVector = {
+                  ...pinch.vector,
+                  x: 1 - pinch.vector.x,
+                  dx: -pinch.vector.dx, // Also flip direction
+                };
+              }
               
               // Change color based on pinch state
               const connectorColor = pinch.isPinching ? '#FFFF00' : '#00FF00'; // Yellow when pinching, green otherwise
@@ -262,6 +345,98 @@ export function HandTracking() {
                 lineWidth: 2,
                 radius: 3,
               });
+            }
+            
+            // Draw vector lines on the canvas when pinching
+            // Use actual pinch position calculated from landmarks
+            if (pinchPosition && pinchVector && originalDirection) {
+              const vectorX = pinchPosition.x;
+              const vectorY = pinchPosition.y;
+              const vectorZ = pinchVector.z * canvas.width; // Scale Z for visibility
+              
+              // Draw position vector (from center to pinch position)
+              const centerX = canvas.width / 2;
+              const centerY = canvas.height / 2;
+              
+              // Position vector: X component (red)
+              canvasCtx.strokeStyle = '#ef4444';
+              canvasCtx.lineWidth = 3;
+              canvasCtx.setLineDash([]);
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(centerX, centerY);
+              canvasCtx.lineTo(vectorX, centerY);
+              canvasCtx.stroke();
+              
+              // Position vector: Y component (green)
+              canvasCtx.strokeStyle = '#22c55e';
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(centerX, centerY);
+              canvasCtx.lineTo(centerX, vectorY);
+              canvasCtx.stroke();
+              
+              // Position vector: Z component (blue) - diagonal
+              canvasCtx.strokeStyle = '#3b82f6';
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(centerX, centerY);
+              canvasCtx.lineTo(centerX + vectorZ * 0.5, centerY + vectorZ * 0.5);
+              canvasCtx.stroke();
+              
+              // Draw direction vector (from pinch position)
+              const directionLength = 100; // Length of direction arrow
+              
+              // Direction vector: dX component (darker red)
+              canvasCtx.strokeStyle = '#dc2626';
+              canvasCtx.lineWidth = 2;
+              canvasCtx.setLineDash([5, 5]);
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(vectorX, vectorY);
+              canvasCtx.lineTo(vectorX + originalDirection.dx * directionLength, vectorY);
+              canvasCtx.stroke();
+              
+              // Direction vector: dY component (darker green)
+              canvasCtx.strokeStyle = '#16a34a';
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(vectorX, vectorY);
+              canvasCtx.lineTo(vectorX, vectorY - originalDirection.dy * directionLength);
+              canvasCtx.stroke();
+              
+              // Direction vector: dZ component (darker blue) - diagonal
+              canvasCtx.strokeStyle = '#2563eb';
+              canvasCtx.beginPath();
+              canvasCtx.moveTo(vectorX, vectorY);
+              canvasCtx.lineTo(
+                vectorX + originalDirection.dz * directionLength * 0.7,
+                vectorY + originalDirection.dz * directionLength * 0.7
+              );
+              canvasCtx.stroke();
+              
+              // Draw pinch position point (exactly where user is pinching)
+              canvasCtx.fillStyle = '#FFFF00';
+              canvasCtx.beginPath();
+              canvasCtx.arc(vectorX, vectorY, 8, 0, 2 * Math.PI);
+              canvasCtx.fill();
+              canvasCtx.strokeStyle = '#000';
+              canvasCtx.lineWidth = 2;
+              canvasCtx.stroke();
+              
+              // Draw center point
+              canvasCtx.fillStyle = '#000';
+              canvasCtx.beginPath();
+              canvasCtx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
+              canvasCtx.fill();
+              
+              // Reset line style
+              canvasCtx.setLineDash([]);
+            }
+            
+            // Call callback with vector (or null if not pinching)
+            if (onPinchVector) {
+              onPinchVector(pinchVector);
+            }
+          } else {
+            // No hands detected
+            if (onPinchVector) {
+              onPinchVector(null);
             }
           }
           canvasCtx.restore();
@@ -378,7 +553,7 @@ export function HandTracking() {
         video.srcObject = null;
       }
     };
-  }, []);
+  }, [onPinchVector]);
 
   const handleStartCamera = async () => {
     if (initFunction) {
