@@ -13,6 +13,7 @@ export default function HandsPage() {
   const [phaseAngles, setPhaseAngles] = useState<number[]>([]);
   const [rightHandDistance, setRightHandDistance] = useState<number | null>(null);
   const [nodesPerOrbit, setNodesPerOrbit] = useState(8);
+  const [leftHanded, setLeftHanded] = useState(false);
   
   // Track pinch history - only start and end points
   usePinchHistory(pinchVector, {
@@ -54,6 +55,17 @@ export default function HandsPage() {
                 <CardDescription>
                   Hand skeleton tracking overlay. Pinch your thumb and index finger together to control the visual.
                 </CardDescription>
+                <div className="mt-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={leftHanded}
+                      onChange={(e) => setLeftHanded(e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    <span>Left-handed mode</span>
+                  </label>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="relative">
@@ -61,6 +73,7 @@ export default function HandsPage() {
                     onPinchVector={setPinchVector}
                     compositeVector={currentVector || finalVector}
                     onRightHandDistance={setRightHandDistance}
+                    leftHanded={leftHanded}
                   />
                 </div>
               </CardContent>

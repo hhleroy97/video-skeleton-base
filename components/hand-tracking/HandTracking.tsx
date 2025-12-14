@@ -110,9 +110,10 @@ export interface HandTrackingProps {
   onPinchVector?: (vector: PinchVector | null) => void;
   compositeVector?: FinalVector | null; // Composite vector to draw on canvas
   onRightHandDistance?: (distance: number | null) => void; // Distance between thumb and index on right hand
+  leftHanded?: boolean; // If true, swap which hand controls what
 }
 
-export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance }: HandTrackingProps = {}) {
+export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, leftHanded = false }: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeVectorRef = useRef<FinalVector | null>(null);
@@ -337,15 +338,18 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
               };
             });
             
-            // Find left hand and use it for phase angle control
-            const leftHand = hands.find((hand: any) => hand.handedness === 'Left');
+            // Determine which hand to use for phase angle control based on leftHanded toggle
+            const controlHandType = leftHanded ? 'Left' : 'Right';
+            const otherHandType = leftHanded ? 'Right' : 'Left';
             
-            // Use left hand if found, otherwise fallback to first hand
+            const controlHand = hands.find((hand: any) => hand.handedness === controlHandType);
+            
+            // Use control hand if found, otherwise fallback to first hand
             // This ensures control always works
-            const handToUse = leftHand || hands[0];
+            const handToUse = controlHand || hands[0];
             
             
-            // Only use left hand for 3D control (or first hand if no left hand detected)
+            // Only use control hand for 3D control (or first hand if no control hand detected)
             if (handToUse) {
               const pinch = detectPinch(handToUse.landmarks, 0.05);
               
@@ -380,18 +384,18 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
               }
             }
             
-            // Draw both hands on canvas (but only left hand controls 3D)
+            // Draw both hands on canvas (but only control hand controls 3D)
             for (const hand of hands) {
               const pinch = detectPinch(hand.landmarks, 0.05);
               
-              // Change color based on pinch state and handedness
-              const isRightHand = hand.handedness === 'Right';
+              // Change color based on pinch state and whether this is the control hand
+              const isControlHand = hand === handToUse;
               const connectorColor = pinch.isPinching 
-                ? (isRightHand ? '#FFFF00' : '#FF00FF') // Yellow for right, magenta for left when pinching
-                : (isRightHand ? '#00FF00' : '#FF8800'); // Green for right, orange for left when not pinching
+                ? (isControlHand ? '#FFFF00' : '#FF00FF') // Yellow for control hand, magenta for other when pinching
+                : (isControlHand ? '#00FF00' : '#FF8800'); // Green for control hand, orange for other when not pinching
               const landmarkColor = pinch.isPinching 
-                ? (isRightHand ? '#FF00FF' : '#00FFFF') // Magenta for right, cyan for left when pinching
-                : (isRightHand ? '#FF0000' : '#FF6600'); // Red for right, orange-red for left when not pinching
+                ? (isControlHand ? '#FF00FF' : '#00FFFF') // Magenta for control hand, cyan for other when pinching
+                : (isControlHand ? '#FF0000' : '#FF6600'); // Red for control hand, orange-red for other when not pinching
               
               // Draw landmarks (will be flipped by the canvas transformation)
               drawConnectors(
@@ -407,24 +411,25 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
               });
             }
             
-            // Draw circle between thumb and index finger of the other hand (right hand)
-            // Find right hand: explicitly Right, or if 2 hands and one is Left, use the other one
-            let rightHand = hands.find((hand: any) => hand.handedness === 'Right');
+            // Draw circle between thumb and index finger of the other hand (not the control hand)
+            // Find the other hand: explicitly the other type, or if 2 hands and one is the control hand, 
+            // the other one should be the other hand
+            let otherHand = hands.find((hand: any) => hand.handedness === otherHandType);
             
-            // Fallback: if we have 2 hands and one is the left hand (used for control), 
-            // the other one should be the right hand
-            if (!rightHand && hands.length === 2 && handToUse) {
-              rightHand = hands.find((hand: any) => hand !== handToUse);
+            // Fallback: if we have 2 hands and one is the control hand, 
+            // the other one should be the other hand
+            if (!otherHand && hands.length === 2 && handToUse) {
+              otherHand = hands.find((hand: any) => hand !== handToUse);
             }
             
             // Another fallback: if we have 2 hands and handedness is Unknown, use the second hand
-            if (!rightHand && hands.length === 2 && handToUse === hands[0]) {
-              rightHand = hands[1];
+            if (!otherHand && hands.length === 2 && handToUse === hands[0]) {
+              otherHand = hands[1];
             }
             
-            if (rightHand) {
-              const thumbTip = rightHand.landmarks[THUMB_TIP];
-              const indexTip = rightHand.landmarks[INDEX_FINGER_TIP];
+            if (otherHand) {
+              const thumbTip = otherHand.landmarks[THUMB_TIP];
+              const indexTip = otherHand.landmarks[INDEX_FINGER_TIP];
               
               if (thumbTip && indexTip) {
                 // Calculate distance between thumb and index finger (normalized 0-1)

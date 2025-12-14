@@ -70,20 +70,20 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
       }
     }
     
-    // Create cosmic connections - reduced number of connections
+    // Create cosmic connections - increased number of connections
     nodes.forEach((node, i) => {
       const connections: number[] = [];
       
-      // Connect to nodes in same orbit (only immediate neighbors)
+      // Connect to nodes in same orbit (more adjacent nodes)
       const sameOrbitNodes = nodes.filter((n, idx) => 
         n.orbitIndex === node.orbitIndex && idx !== i
       );
-      // Connect to only 1-2 closest adjacent nodes in same orbit
-      const adjacentCount = Math.min(2, sameOrbitNodes.length);
+      // Connect to 3-4 adjacent nodes in same orbit
+      const adjacentCount = Math.min(4, sameOrbitNodes.length);
       for (let j = 0; j < adjacentCount; j++) {
         const angleDiff = Math.abs(node.angle - sameOrbitNodes[j].angle);
         const normalizedDiff = Math.min(angleDiff, Math.PI * 2 - angleDiff);
-        if (normalizedDiff < Math.PI / 3) { // Within 60 degrees (stricter)
+        if (normalizedDiff < Math.PI / 2) { // Within 90 degrees (more permissive)
           const otherIdx = nodes.indexOf(sameOrbitNodes[j]);
           if (otherIdx !== -1 && !connections.includes(otherIdx)) {
             connections.push(otherIdx);
@@ -91,16 +91,16 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
         }
       }
       
-      // Connect to nodes in adjacent orbits (stricter distance threshold)
+      // Connect to nodes in adjacent orbits (more permissive distance threshold)
       nodes.forEach((other, j) => {
-        if (i !== j && Math.abs(other.orbitIndex - node.orbitIndex) === 1) {
+        if (i !== j && Math.abs(other.orbitIndex - node.orbitIndex) <= 1) {
           const dx = node.radius * Math.cos(node.angle) - other.radius * Math.cos(other.angle);
           const dy = node.height - other.height;
           const dz = node.radius * Math.sin(node.angle) - other.radius * Math.sin(other.angle);
           const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
           
-          // Connect only if within stricter threshold
-          if (dist < 0.8) {
+          // Connect if within more permissive threshold
+          if (dist < 1.4) {
             if (!connections.includes(j)) {
               connections.push(j);
             }
@@ -108,8 +108,8 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
         }
       });
       
-      // Ensure each node has at least 2 connections (reduced from 3)
-      if (connections.length < 2) {
+      // Ensure each node has at least 4 connections (increased from 2)
+      if (connections.length < 4) {
         // Add more connections to nearest nodes
         const distances = nodes.map((other, j) => {
           if (i === j || connections.includes(j)) return { idx: j, dist: Infinity };
@@ -120,9 +120,9 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
           return { idx: j, dist };
         });
         distances.sort((a, b) => a.dist - b.dist);
-        const needed = 2 - connections.length;
+        const needed = 4 - connections.length;
         for (let k = 0; k < needed && k < distances.length; k++) {
-          if (distances[k].dist < Infinity && distances[k].dist < 1.0) {
+          if (distances[k].dist < Infinity && distances[k].dist < 1.5) {
             connections.push(distances[k].idx);
           }
         }
