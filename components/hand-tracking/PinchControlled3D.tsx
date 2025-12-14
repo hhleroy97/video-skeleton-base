@@ -11,6 +11,7 @@ interface PinchControlled3DProps {
   className?: string;
   nodesPerOrbit?: number; // Number of nodes per layer (controlled by right hand distance)
   onPhaseAnglesChange?: (phaseAngles: number[]) => void; // Callback to report phase angles
+  fullscreen?: boolean; // If true, make the canvas full screen and hide controls
 }
 
 /**
@@ -385,6 +386,7 @@ export function PinchControlled3D({
   className = '',
   nodesPerOrbit: externalNodesPerOrbit = 8,
   onPhaseAnglesChange,
+  fullscreen = false,
 }: PinchControlled3DProps) {
   const [cameraX, setCameraX] = useState(0);
   const [cameraY, setCameraY] = useState(-4);
@@ -400,8 +402,8 @@ export function PinchControlled3D({
   }, [externalNodesPerOrbit]);
   
   return (
-    <div className={`w-full ${className}`}>
-      <div className="w-full h-96 bg-gradient-to-br from-gray-900 to-gray-800 rounded-lg border-2 border-gray-700 mb-4">
+    <div className={fullscreen ? `absolute inset-0 w-full h-full ${className}` : `w-full ${className}`}>
+      <div className={fullscreen ? "absolute inset-0 w-full h-full" : "w-full h-96 bg-gradient-to-br from-gray-900 to-gray-800 rounded-lg border-2 border-gray-700 mb-4"}>
         <Canvas>
           <CameraController 
             x={cameraX} 
@@ -436,7 +438,8 @@ export function PinchControlled3D({
         </Canvas>
       </div>
       
-      {/* Camera Control Sliders */}
+      {/* Camera Control Sliders - hidden in fullscreen mode */}
+      {!fullscreen && (
       <div className="space-y-4 p-4 bg-gray-800 rounded-lg border border-gray-700">
         <div>
           <h3 className="text-sm font-semibold text-gray-300 mb-3">Camera Position</h3>
@@ -559,6 +562,7 @@ export function PinchControlled3D({
            </div>
          </div>
        </div>
+      )}
      </div>
    );
  }

@@ -111,9 +111,10 @@ export interface HandTrackingProps {
   compositeVector?: FinalVector | null; // Composite vector to draw on canvas
   onRightHandDistance?: (distance: number | null) => void; // Distance between thumb and index on right hand
   leftHanded?: boolean; // If true, swap which hand controls what
+  className?: string; // Optional className for custom styling
 }
 
-export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, leftHanded = false }: HandTrackingProps = {}) {
+export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, leftHanded = false, className = '' }: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeVectorRef = useRef<FinalVector | null>(null);
@@ -722,7 +723,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
   };
 
   return (
-    <div className="relative inline-block w-full">
+    <div className={`relative inline-block w-full ${className.includes('object-cover') ? 'w-full h-full' : ''}`}>
       <video
         ref={videoRef}
         style={{ display: 'none' }}
@@ -732,12 +733,12 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
         playsInline
         muted
       />
-      <div className="relative">
+      <div className={`relative ${className.includes('object-cover') ? 'w-full h-full' : ''}`}>
         <canvas
           ref={canvasRef}
           width={640}
           height={480}
-          className="w-full max-w-full h-auto border border-gray-300 rounded-lg"
+          className={`${className.includes('object-cover') ? 'w-full h-full object-cover' : 'w-full max-w-full h-auto'} border border-gray-300 rounded-lg ${className}`}
         />
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-75 rounded-lg">
