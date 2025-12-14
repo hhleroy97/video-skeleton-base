@@ -304,17 +304,45 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
           let originalDirection: { dx: number; dy: number } | null = null; // Original direction for drawing
 
           if (results.multiHandLandmarks) {
+            // Match landmarks with handedness (if available)
+            const hands = results.multiHandLandmarks.map((landmarks: any, index: number) => {
+              // MediaPipe handedness can be an array or object
+              let handedness = 'Unknown';
+              if (results.multiHandedness && results.multiHandedness[index]) {
+                const handData = results.multiHandedness[index];
+                if (Array.isArray(handData) && handData[0]) {
+                  handedness = handData[0].categoryName || 'Unknown';
+                } else if (handData.categoryName) {
+                  handedness = handData.categoryName;
+                }
+              }
+              return {
+                landmarks,
+                handedness,
+              };
+            });
             
-            for (const landmarks of results.multiHandLandmarks) {
-              // Detect pinch for this hand
-              const pinch = detectPinch(landmarks, 0.05);
+            // Find left hand and use it for phase angle control
+            const leftHand = hands.find((hand: any) => hand.handedness === 'Left');
+            
+            // Use left hand if found, otherwise fallback to first hand
+            // This ensures control always works
+            const handToUse = leftHand || hands[0];
+            
+            // Debug: log which hand we're using
+            if (handToUse && hands.length > 0) {
+              console.log('Using hand for control:', handToUse.handedness, 'out of', hands.length, 'detected hands');
+            }
+            
+            // Only use left hand for 3D control (or first hand if no left hand detected)
+            if (handToUse) {
+              const pinch = detectPinch(handToUse.landmarks, 0.05);
               
-              // Track vector from first hand
-              if (pinch.vector && !pinchVector) {
+              if (pinch.vector) {
                 // Calculate actual pinch position from landmarks (midpoint of thumb and index)
                 // Convert from center-origin to pixel coordinates
-                const thumbTip = landmarks[THUMB_TIP];
-                const indexTip = landmarks[INDEX_FINGER_TIP];
+                const thumbTip = handToUse.landmarks[THUMB_TIP];
+                const indexTip = handToUse.landmarks[INDEX_FINGER_TIP];
                 if (thumbTip && indexTip) {
                   const centerX = canvas.width / 2;
                   const centerY = canvas.height / 2;
@@ -339,19 +367,29 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
                   dx: -pinch.vector.dx, // Also flip direction
                 };
               }
+            }
+            
+            // Draw both hands on canvas (but only left hand controls 3D)
+            for (const hand of hands) {
+              const pinch = detectPinch(hand.landmarks, 0.05);
               
-              // Change color based on pinch state
-              const connectorColor = pinch.isPinching ? '#FFFF00' : '#00FF00'; // Yellow when pinching, green otherwise
-              const landmarkColor = pinch.isPinching ? '#FF00FF' : '#FF0000'; // Magenta when pinching, red otherwise
+              // Change color based on pinch state and handedness
+              const isRightHand = hand.handedness === 'Right';
+              const connectorColor = pinch.isPinching 
+                ? (isRightHand ? '#FFFF00' : '#FF00FF') // Yellow for right, magenta for left when pinching
+                : (isRightHand ? '#00FF00' : '#FF8800'); // Green for right, orange for left when not pinching
+              const landmarkColor = pinch.isPinching 
+                ? (isRightHand ? '#FF00FF' : '#00FFFF') // Magenta for right, cyan for left when pinching
+                : (isRightHand ? '#FF0000' : '#FF6600'); // Red for right, orange-red for left when not pinching
               
               // Draw landmarks (will be flipped by the canvas transformation)
               drawConnectors(
                 canvasCtx,
-                landmarks,
+                hand.landmarks,
                 HandsClass.HAND_CONNECTIONS || HAND_CONNECTIONS,
                 { color: connectorColor, lineWidth: 5 }
               );
-              drawLandmarks(canvasCtx, landmarks, {
+              drawLandmarks(canvasCtx, hand.landmarks, {
                 color: landmarkColor,
                 lineWidth: 2,
                 radius: 3,
@@ -407,6 +445,10 @@ export function HandTracking({ onPinchVector, compositeVector }: HandTrackingPro
           // Call callback with vector (or null if not pinching)
           if (onPinchVector) {
             onPinchVector(pinchVector);
+            // Debug: log when vector changes
+            if (pinchVector) {
+              console.log('Sending pinch vector:', { x: pinchVector.x.toFixed(3), y: pinchVector.y.toFixed(3) });
+            }
           }
           
           // Draw composite vector LAST so it appears on top of everything

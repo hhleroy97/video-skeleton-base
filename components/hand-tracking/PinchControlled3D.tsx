@@ -172,19 +172,26 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit }: { vector: PinchVector |
     
     // ONLY update phase angles based on movement - nothing else
     if (vector) {
+      // Debug: log when we have a vector
+      if (!previousVectorRef.current) {
+        console.log('VoronoiOrbitalSystem: Starting to track vector', { x: vector.x.toFixed(3), y: vector.y.toFixed(3) });
+      }
       if (previousVectorRef.current) {
         const deltaX = vector.x - previousVectorRef.current.x;
         const deltaY = vector.y - previousVectorRef.current.y;
         
-        // Update phase angles between layers based on user movement
-        for (let orbit = 0; orbit < numOrbits; orbit++) {
-          // Phase angle changes based on movement
-          const phaseChange = 
-            deltaX * 1.0 * (orbit + 1) + // X movement affects phase
-            deltaY * 0.8 * (orbit + 1); // Y movement affects phase
-          
-          // Accumulate phase angle directly
-          phaseAnglesRef.current[orbit] += phaseChange;
+        // Only update if there's actual movement
+        if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
+          // Update phase angles between layers based on user movement
+          for (let orbit = 0; orbit < numOrbits; orbit++) {
+            // Phase angle changes based on movement
+            const phaseChange = 
+              deltaX * 1.0 * (orbit + 1) + // X movement affects phase
+              deltaY * 0.8 * (orbit + 1); // Y movement affects phase
+            
+            // Accumulate phase angle directly
+            phaseAnglesRef.current[orbit] += phaseChange;
+          }
         }
       }
       previousVectorRef.current = { x: vector.x, y: vector.y };
