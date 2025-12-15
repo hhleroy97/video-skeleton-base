@@ -38,8 +38,8 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
   const voxelSize = 0.12;
   const lagFactor = 0.15; // Smoothing factor (0.1 = very smooth/slow, 0.3 = more responsive)
   
-  // Create orbital nodes with Voronoi-like connections
-  const orbitalNodes = useMemo(() => {
+  // Create orbital nodes with Voronoi-like connections, materials, and geometries
+  const { orbitalNodes, nodeMaterials, connectionGeometries } = useMemo(() => {
     const nodes: Array<{
       id: number;
       orbitIndex: number;
@@ -134,33 +134,68 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
       node.connections = connections;
     });
     
+    // Create materials once per node (PERFORMANCE FIX)
+    const nodeMaterials: THREE.MeshToonMaterial[] = [];
+    const gradientMap = (() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+      const gradient = ctx.createLinearGradient(0, 0, 0, 64);
+      gradient.addColorStop(0, '#ffffff');
+      gradient.addColorStop(0.5, '#aaaaaa');
+      gradient.addColorStop(1, '#000000');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 2, 64);
+      return new THREE.CanvasTexture(canvas);
+    })();
+    
+    nodes.forEach((node) => {
+      const material = new THREE.MeshToonMaterial({
+        color: node.color.clone(),
+        gradientMap: gradientMap,
+      });
+      nodeMaterials.push(material);
+    });
+    
+    // Create geometries once per connection (PERFORMANCE FIX)
+    const connectionGeometries: Map<string, THREE.BufferGeometry> = new Map();
+    nodes.forEach((node, index) => {
+      node.connections.forEach((connectedIndex) => {
+        const connectedNode = nodes[connectedIndex];
+        if (!connectedNode) return;
+        
+        const key = `${Math.min(index, connectedIndex)}-${Math.max(index, connectedIndex)}`;
+        if (!connectionGeometries.has(key)) {
+          const x1 = node.radius * Math.cos(node.angle);
+          const y1 = node.height;
+          const z1 = node.radius * Math.sin(node.angle);
+          
+          const x2 = connectedNode.radius * Math.cos(connectedNode.angle);
+          const y2 = connectedNode.height;
+          const z2 = connectedNode.radius * Math.sin(connectedNode.angle);
+          
+          const geometry = new THREE.BufferGeometry();
+          const positions = new Float32Array([x1, y1, z1, x2, y2, z2]);
+          const colors = new Float32Array([
+            node.color.r, node.color.g, node.color.b,
+            connectedNode.color.r, connectedNode.color.g, connectedNode.color.b,
+          ]);
+          
+          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+          connectionGeometries.set(key, geometry);
+        }
+      });
+    });
+    
     nodesRef.current = nodes;
     // Initialize phase angles for each orbit (starting with offsets)
     const initialPhases = Array(numOrbits).fill(0).map((_, i) => (i / numOrbits) * Math.PI * 2);
     phaseAnglesRef.current = initialPhases;
     targetPhaseAnglesRef.current = [...initialPhases]; // Initialize target to same values
-    return nodes;
+    return { orbitalNodes: nodes, nodeMaterials, connectionGeometries };
   }, [nodesPerOrbit]);
-  
-  // Toon shading material for voxels
-  const toonMaterial = useMemo(() => {
-    return new THREE.MeshToonMaterial({
-      color: 0xffffff,
-      gradientMap: (() => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 2;
-        canvas.height = 64;
-        const ctx = canvas.getContext('2d')!;
-        const gradient = ctx.createLinearGradient(0, 0, 0, 64);
-        gradient.addColorStop(0, '#ffffff');
-        gradient.addColorStop(0.5, '#aaaaaa');
-        gradient.addColorStop(1, '#000000');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 2, 64);
-        return new THREE.CanvasTexture(canvas);
-      })(),
-    });
-  }, []);
   
   // Wireframe material for connections with vertex colors for gradients
   const wireframeMaterial = useMemo(() => {
@@ -171,6 +206,10 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
       linewidth: 2,
     });
   }, []);
+
+  // Reusable color objects for animation loop (PERFORMANCE FIX)
+  const color1Ref = useRef(new THREE.Color());
+  const color2Ref = useRef(new THREE.Color());
 
   useFrame((state, delta) => {
     if (!groupRef.current) return;
@@ -279,24 +318,24 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
           positions.setXYZ(1, pos2.x, pos2.y, pos2.z);
           positions.needsUpdate = true;
           
-          // Update colors for gradient based on phase angles
+          // Update colors for gradient based on phase angles (reuse color objects - PERFORMANCE FIX)
           const orbitFactor1 = node.orbitIndex / numOrbits;
           const orbitFactor2 = connectedNode.orbitIndex / numOrbits;
           
           const hue1 = (orbitFactor1 * 0.6 + phaseAngle1 * 0.1) % 1;
           const saturation1 = 0.8 + orbitFactor1 * 0.1;
           const lightness1 = 0.5 + Math.sin(phaseAngle1) * 0.2;
-          const color1 = new THREE.Color().setHSL(hue1, saturation1, lightness1);
+          color1Ref.current.setHSL(hue1, saturation1, lightness1);
           
           const hue2 = (orbitFactor2 * 0.6 + phaseAngle2 * 0.1) % 1;
           const saturation2 = 0.8 + orbitFactor2 * 0.1;
           const lightness2 = 0.5 + Math.sin(phaseAngle2) * 0.2;
-          const color2 = new THREE.Color().setHSL(hue2, saturation2, lightness2);
+          color2Ref.current.setHSL(hue2, saturation2, lightness2);
           
           // Set gradient colors
           if (colorAttribute) {
-            colorAttribute.setXYZ(0, color1.r, color1.g, color1.b);
-            colorAttribute.setXYZ(1, color2.r, color2.g, color2.b);
+            colorAttribute.setXYZ(0, color1Ref.current.r, color1Ref.current.g, color1Ref.current.b);
+            colorAttribute.setXYZ(1, color2Ref.current.r, color2Ref.current.g, color2Ref.current.b);
             colorAttribute.needsUpdate = true;
           }
         }
@@ -306,11 +345,8 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
 
   return (
     <group ref={groupRef}>
-      {/* Orbital nodes as voxel cubes */}
+      {/* Orbital nodes as voxel cubes - using memoized materials (PERFORMANCE FIX) */}
       {orbitalNodes.map((node, index) => {
-        const material = toonMaterial.clone();
-        material.color.copy(node.color);
-        
         const angle = node.angle;
         const x = node.radius * Math.cos(angle);
         const y = node.height;
@@ -320,7 +356,7 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
           <mesh
             key={`node-${index}`}
             position={[x, y, z]}
-            material={material}
+            material={nodeMaterials[index]}
             userData={{ nodeIndex: index }}
           >
             <boxGeometry args={[voxelSize, voxelSize, voxelSize]} />
@@ -328,30 +364,17 @@ function VoronoiOrbitalSystem({ vector, nodesPerOrbit, onPhaseAnglesChange }: { 
         );
       })}
       
-      {/* Voronoi wireframe connections with gradient colors */}
+      {/* Voronoi wireframe connections with gradient colors - using memoized geometries (PERFORMANCE FIX) */}
       {orbitalNodes.map((node, index) => {
         return node.connections.map((connectedIndex, connIdx) => {
           const connectedNode = orbitalNodes[connectedIndex];
           if (!connectedNode) return null;
           
-          const x1 = node.radius * Math.cos(node.angle);
-          const y1 = node.height;
-          const z1 = node.radius * Math.sin(node.angle);
+          // Use consistent key for geometry lookup
+          const key = `${Math.min(index, connectedIndex)}-${Math.max(index, connectedIndex)}`;
+          const geometry = connectionGeometries.get(key);
           
-          const x2 = connectedNode.radius * Math.cos(connectedNode.angle);
-          const y2 = connectedNode.height;
-          const z2 = connectedNode.radius * Math.sin(connectedNode.angle);
-          
-          // Create geometry with positions and colors for gradient
-          const geometry = new THREE.BufferGeometry();
-          const positions = new Float32Array([x1, y1, z1, x2, y2, z2]);
-          const colors = new Float32Array([
-            node.color.r, node.color.g, node.color.b, // Start color from first node
-            connectedNode.color.r, connectedNode.color.g, connectedNode.color.b, // End color from second node
-          ]);
-          
-          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-          geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+          if (!geometry) return null;
           
           const line = new THREE.Line(geometry, wireframeMaterial);
           line.userData = { connectionIndex: index, connectedTo: connectedIndex };
