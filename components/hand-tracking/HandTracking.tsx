@@ -112,9 +112,10 @@ export interface HandTrackingProps {
   onRightHandDistance?: (distance: number | null) => void; // Distance between thumb and index on right hand
   leftHanded?: boolean; // If true, swap which hand controls what
   className?: string; // Optional className for custom styling
+  hideRestartButton?: boolean; // If true, hide the restart camera button
 }
 
-export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, leftHanded = false, className = '' }: HandTrackingProps = {}) {
+export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, leftHanded = false, className = '', hideRestartButton = false }: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeVectorRef = useRef<FinalVector | null>(null);
@@ -474,26 +475,6 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
               const vectorX = pinchPosition.x;
               const vectorY = pinchPosition.y;
               
-              // Draw position vector (from center to pinch position)
-              const centerX = canvas.width / 2;
-              const centerY = canvas.height / 2;
-              
-              // Position vector: X component (red)
-              canvasCtx.strokeStyle = '#ef4444';
-              canvasCtx.lineWidth = 3;
-              canvasCtx.setLineDash([]);
-              canvasCtx.beginPath();
-              canvasCtx.moveTo(centerX, centerY);
-              canvasCtx.lineTo(vectorX, centerY);
-              canvasCtx.stroke();
-              
-              // Position vector: Y component (green)
-              canvasCtx.strokeStyle = '#22c55e';
-              canvasCtx.beginPath();
-              canvasCtx.moveTo(centerX, centerY);
-              canvasCtx.lineTo(centerX, vectorY);
-              canvasCtx.stroke();
-              
               // Draw pinch position point (exactly where user is pinching)
               canvasCtx.fillStyle = '#FFFF00';
               canvasCtx.beginPath();
@@ -502,12 +483,6 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
               canvasCtx.strokeStyle = '#000';
               canvasCtx.lineWidth = 2;
               canvasCtx.stroke();
-              
-              // Draw center point
-              canvasCtx.fillStyle = '#000';
-              canvasCtx.beginPath();
-              canvasCtx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
-              canvasCtx.fill();
               
               // Reset line style
               canvasCtx.setLineDash([]);
@@ -770,7 +745,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
             </div>
           </div>
         )}
-        {!isLoading && !error && scriptsLoaded && (
+        {!isLoading && !error && scriptsLoaded && !hideRestartButton && (
           <div className="absolute top-2 right-2">
             <button
               onClick={handleStartCamera}

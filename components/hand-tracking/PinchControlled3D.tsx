@@ -417,7 +417,20 @@ export function PinchControlled3D({
   return (
     <div className={fullscreen ? `absolute inset-0 w-full h-full ${className}` : `w-full ${className}`}>
       <div className={fullscreen ? "absolute inset-0 w-full h-full" : "w-full h-96 bg-gradient-to-br from-gray-900 to-gray-800 rounded-lg border-2 border-gray-700 mb-4"}>
-        <Canvas>
+        <Canvas
+            gl={{ 
+              antialias: true, 
+              alpha: false,
+              powerPreference: "high-performance",
+              failIfMajorPerformanceCaveat: false
+            }}
+            onCreated={({ gl }) => {
+              gl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            }}
+            onError={(error) => {
+              console.error('Canvas error:', error);
+            }}
+          >
           <CameraController 
             x={cameraX} 
             y={cameraY} 

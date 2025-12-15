@@ -44,7 +44,7 @@ export default function HandsPage() {
       {/* Circular camera feed overlay - centered */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50">
         {/* Circular container for camera feed with outer ring */}
-        <div className="relative w-60 h-60 rounded-full">
+        <div className="relative w-[300px] h-[300px] rounded-full">
           {/* Outer ring circle */}
           <div className="absolute inset-0 rounded-full border-4 border-white/40"></div>
           {/* Inner circular feed container */}
@@ -56,6 +56,7 @@ export default function HandsPage() {
                 onRightHandDistance={setRightHandDistance}
                 leftHanded={leftHanded}
                 className="!border-0 !rounded-none"
+                hideRestartButton={true}
               />
             </div>
           </div>
