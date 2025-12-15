@@ -106,16 +106,22 @@ export interface PinchVector {
   dy: number; // Direction Y (normalized)
 }
 
+export interface Hand3DData {
+  landmarks: Array<{ x: number; y: number; z: number }>;
+  handedness: 'Left' | 'Right' | 'Unknown';
+}
+
 export interface HandTrackingProps {
   onPinchVector?: (vector: PinchVector | null) => void;
   compositeVector?: FinalVector | null; // Composite vector to draw on canvas
   onRightHandDistance?: (distance: number | null) => void; // Distance between thumb and index on right hand
+  onHands3D?: (hands: Hand3DData[]) => void; // Callback with 3D hand data for visualization
   leftHanded?: boolean; // If true, swap which hand controls what
   className?: string; // Optional className for custom styling
   hideRestartButton?: boolean; // If true, hide the restart camera button
 }
 
-export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, leftHanded = false, className = '', hideRestartButton = false }: HandTrackingProps = {}) {
+export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, onHands3D, leftHanded = false, className = '', hideRestartButton = false }: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeVectorRef = useRef<FinalVector | null>(null);
@@ -339,6 +345,19 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
                 handedness,
               };
             });
+            
+            // Callback with 3D hand data for visualization
+            if (onHands3D) {
+              const hands3D: Hand3DData[] = hands.map(hand => ({
+                landmarks: hand.landmarks.map((lm: any) => ({
+                  x: lm.x,
+                  y: lm.y,
+                  z: lm.z || 0,
+                })),
+                handedness: hand.handedness as 'Left' | 'Right' | 'Unknown',
+              }));
+              onHands3D(hands3D);
+            }
             
             // Determine which hand to use for phase angle control based on leftHanded toggle
             const controlHandType = leftHanded ? 'Left' : 'Right';
