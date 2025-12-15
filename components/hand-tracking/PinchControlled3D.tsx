@@ -441,14 +441,16 @@ export function PinchControlled3D({
     <div className={fullscreen ? `absolute inset-0 w-full h-full ${className}` : `w-full ${className}`}>
       <div className={fullscreen ? "absolute inset-0 w-full h-full" : "w-full h-96 bg-gradient-to-br from-gray-900 to-gray-800 rounded-lg border-2 border-gray-700 mb-4"}>
         <Canvas
-            gl={{ 
-              antialias: true, 
+            gl={{
+              antialias: true,
               alpha: false,
               powerPreference: "high-performance",
               failIfMajorPerformanceCaveat: false
             }}
-            onCreated={({ gl }) => {
+            onCreated={({ gl, scene }) => {
               gl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+              // Set background color to white
+              gl.setClearColor(0xffffff, 1);
             }}
             onError={(error) => {
               console.error('Canvas error:', error);

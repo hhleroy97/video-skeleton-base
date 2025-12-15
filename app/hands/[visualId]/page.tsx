@@ -49,7 +49,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
   const visualConfig = getVisualConfig(visualId);
   
   if (!visualId) {
-    return <div className="flex items-center justify-center w-screen h-screen bg-black text-white">Loading...</div>;
+    return <div className="flex items-center justify-center w-screen h-screen bg-white text-black">Loading...</div>;
   }
   
   if (!visualConfig) {
@@ -81,7 +81,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
   };
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-black">
+    <main className="relative w-screen h-screen overflow-hidden bg-white">
       {/* Navigation bar */}
       <div className="absolute top-4 left-4 z-50 flex gap-2">
         <Link

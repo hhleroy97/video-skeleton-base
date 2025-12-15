@@ -461,25 +461,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
                   onRightHandDistance(distance);
                 }
                 
-                // Calculate midpoint between thumb and index finger
-                // Canvas transformation already handles flipping, so use original coordinates
-                const midX = ((thumbTip.x + indexTip.x) / 2) * canvas.width;
-                const midY = ((thumbTip.y + indexTip.y) / 2) * canvas.height;
-                
-                // Calculate distance in pixels for circle radius
-                const dx = (indexTip.x - thumbTip.x) * canvas.width;
-                const dy = (indexTip.y - thumbTip.y) * canvas.height;
-                const radius = Math.sqrt(dx * dx + dy * dy) / 2;
-                
-                // Only draw if radius is reasonable (fingers are separated)
-                if (radius > 5) {
-                  // Draw circle with border and no fill - make it more visible
-                  canvasCtx.strokeStyle = '#00FFFF'; // Cyan border for visibility
-                  canvasCtx.lineWidth = 3; // Thicker line
-                  canvasCtx.beginPath();
-                  canvasCtx.arc(midX, midY, radius, 0, 2 * Math.PI);
-                  canvasCtx.stroke();
-                }
+                // Circle overlay removed - no longer drawing the cyan circle
               }
             } else {
               // No right hand detected

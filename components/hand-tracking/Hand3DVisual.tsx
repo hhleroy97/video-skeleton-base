@@ -46,6 +46,10 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
   const connectionsRef = useRef<THREE.Line[][]>([]);
   const boundingBoxesRef = useRef<THREE.LineSegments[]>([]);
   
+  // Smoothing: store previous positions for each landmark to reduce jitter
+  const smoothedPositionsRef = useRef<Map<number, { x: number; y: number; z: number }[]>>(new Map());
+  const SMOOTHING_FACTOR = 0.3; // Lower = more smoothing (0.0 to 1.0)
+  
   // Create shared geometries (reused for all hands)
   const landmarkGeometry = useMemo(() => {
     return new THREE.SphereGeometry(0.015, 16, 16);
@@ -125,10 +129,17 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
     
     // Remove excess hands if we have more than MAX_HANDS (shouldn't happen, but safety check)
     while (handsRef.current.length > MAX_HANDS) {
+      const handIndex = handsRef.current.length - 1;
       const handGroup = handsRef.current.pop();
       const boundingBox = boundingBoxesRef.current.pop();
       const landmarkMeshes = landmarksRef.current.pop();
       const connectionLines = connectionsRef.current.pop();
+      
+      // Clean up smoothed positions for this hand
+      for (let i = 0; i < 21; i++) {
+        const key = handIndex * 1000 + i;
+        smoothedPositionsRef.current.delete(key);
+      }
       
       if (handGroup) {
         groupRef.current.remove(handGroup);
@@ -206,9 +217,9 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
       };
     }
     
-    // Convert to 3D space coordinates
+    // Convert to 3D space coordinates with Y-axis flip
     const points = landmarks.map(lm => ({
-      x: (lm.x - 0.5) * 2,
+      x: -((lm.x - 0.5) * 2), // Flip about Y-axis
       y: (0.5 - lm.y) * 2,
       z: lm.z * 2,
     }));
@@ -283,8 +294,64 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
         }
       });
       
-      // Calculate bounding box
-      const bbox = calculateBoundingBox(hand.landmarks);
+      // Calculate bounding box using smoothed 3D positions directly
+      // (already flipped and smoothed, so we can use them directly)
+      const smoothedPoints = hand.landmarks.map((landmark, idx) => {
+        const key = handIndex * 1000 + idx;
+        const smoothed = smoothedPositionsRef.current.get(key);
+        if (smoothed) {
+          // Use smoothed 3D positions directly (already flipped about Y-axis)
+          return {
+            x: smoothed[0].x,
+            y: smoothed[0].y,
+            z: smoothed[0].z,
+          };
+        }
+        // Fallback to raw calculation if smoothing not available yet
+        return {
+          x: -((landmark.x - 0.5) * 2),
+          y: (0.5 - landmark.y) * 2,
+          z: landmark.z * 2,
+        };
+      });
+      
+      // Calculate bounding box from smoothed 3D points
+      let bbox: HandBoundingBox;
+      if (smoothedPoints.length === 0) {
+        bbox = {
+          center: { x: 0, y: 0, z: 0 },
+          size: { width: 0, height: 0, depth: 0 },
+          min: { x: 0, y: 0, z: 0 },
+          max: { x: 0, y: 0, z: 0 },
+        };
+      } else {
+        const min = {
+          x: Math.min(...smoothedPoints.map(p => p.x)),
+          y: Math.min(...smoothedPoints.map(p => p.y)),
+          z: Math.min(...smoothedPoints.map(p => p.z)),
+        };
+        
+        const max = {
+          x: Math.max(...smoothedPoints.map(p => p.x)),
+          y: Math.max(...smoothedPoints.map(p => p.y)),
+          z: Math.max(...smoothedPoints.map(p => p.z)),
+        };
+        
+        const center = {
+          x: (min.x + max.x) / 2,
+          y: (min.y + max.y) / 2,
+          z: (min.z + max.z) / 2,
+        };
+        
+        const size = {
+          width: max.x - min.x,
+          height: max.y - min.y,
+          depth: max.z - min.z,
+        };
+        
+        bbox = { center, size, min, max };
+      }
+      
       boundingBoxes.push(bbox);
       
       // Update bounding box wireframe
@@ -330,7 +397,7 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
         ? rightHandLineMaterial
         : unknownHandLineMaterial;
       
-      // Update landmark positions
+      // Update landmark positions with smoothing
       hand.landmarks.forEach((landmark, index) => {
         if (index >= landmarkMeshes.length) return;
         
@@ -338,11 +405,27 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
         if (!mesh) return;
         
         // MediaPipe coordinates: x, y are normalized 0-1, z is depth in meters
-        const x = (landmark.x - 0.5) * 2; // -1 to 1
-        const y = (0.5 - landmark.y) * 2; // Flip Y, -1 to 1
-        const z = landmark.z * 2; // Scale depth
+        const rawX = -((landmark.x - 0.5) * 2); // Flip about Y-axis: -1 to 1, negated
+        const rawY = (0.5 - landmark.y) * 2; // Flip Y, -1 to 1
+        const rawZ = landmark.z * 2; // Scale depth
         
-        mesh.position.set(x, y, z);
+        // Apply exponential moving average smoothing
+        const key = handIndex * 1000 + index; // Unique key for each hand's landmark
+        let smoothedPositions = smoothedPositionsRef.current.get(key);
+        
+        if (!smoothedPositions) {
+          smoothedPositions = [{ x: rawX, y: rawY, z: rawZ }];
+          smoothedPositionsRef.current.set(key, smoothedPositions);
+        }
+        
+        const prev = smoothedPositions[0];
+        const smoothedX = prev.x * (1 - SMOOTHING_FACTOR) + rawX * SMOOTHING_FACTOR;
+        const smoothedY = prev.y * (1 - SMOOTHING_FACTOR) + rawY * SMOOTHING_FACTOR;
+        const smoothedZ = prev.z * (1 - SMOOTHING_FACTOR) + rawZ * SMOOTHING_FACTOR;
+        
+        smoothedPositions[0] = { x: smoothedX, y: smoothedY, z: smoothedZ };
+        
+        mesh.position.set(smoothedX, smoothedY, smoothedZ);
         mesh.visible = true;
         
         // Update material based on handedness - always assign to ensure correct material
@@ -362,7 +445,7 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
         }
       });
       
-      // Update connection lines
+      // Update connection lines (use smoothed positions)
       HAND_CONNECTIONS.forEach(([startIdx, endIdx], connIndex) => {
         if (connIndex >= connectionLines.length) return;
         
@@ -371,13 +454,20 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
         const line = connectionLines[connIndex];
         
         if (start && end && line) {
-          const startX = (start.x - 0.5) * 2;
-          const startY = (0.5 - start.y) * 2;
-          const startZ = start.z * 2;
+          // Get smoothed positions for start and end points
+          const startKey = handIndex * 1000 + startIdx;
+          const endKey = handIndex * 1000 + endIdx;
+          const startSmoothed = smoothedPositionsRef.current.get(startKey);
+          const endSmoothed = smoothedPositionsRef.current.get(endKey);
           
-          const endX = (end.x - 0.5) * 2;
-          const endY = (0.5 - end.y) * 2;
-          const endZ = end.z * 2;
+          // Use smoothed positions if available, otherwise calculate raw (with Y-axis flip)
+          const startX = startSmoothed ? startSmoothed[0].x : -((start.x - 0.5) * 2);
+          const startY = startSmoothed ? startSmoothed[0].y : (0.5 - start.y) * 2;
+          const startZ = startSmoothed ? startSmoothed[0].z : start.z * 2;
+          
+          const endX = endSmoothed ? endSmoothed[0].x : -((end.x - 0.5) * 2);
+          const endY = endSmoothed ? endSmoothed[0].y : (0.5 - end.y) * 2;
+          const endZ = endSmoothed ? endSmoothed[0].z : end.z * 2;
           
           const positions = line.geometry.getAttribute('position') as THREE.BufferAttribute;
           positions.setXYZ(0, startX, startY, startZ);
@@ -420,15 +510,17 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
  */
 export function Hand3DVisual({ hands, className = '', onBoundingBoxes }: Hand3DVisualProps) {
   return (
-    <div className={`w-full h-full ${className}`}>
+    <div className={`w-full h-full bg-white ${className}`}>
       <Canvas
         gl={{ 
           antialias: true, 
-          alpha: true,
+          alpha: false,
           powerPreference: "high-performance",
         }}
-        onCreated={({ gl }) => {
+        onCreated={({ gl, scene }) => {
           gl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+          // Set background color to white
+          gl.setClearColor(0xffffff, 1);
         }}
       >
         <PerspectiveCamera makeDefault position={[0, 0, 2]} fov={50} />
