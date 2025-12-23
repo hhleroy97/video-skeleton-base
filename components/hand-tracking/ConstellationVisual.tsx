@@ -7,6 +7,8 @@ import { useMemo, useRef } from 'react';
 import type { Hand3DData } from './HandTracking';
 import { landmarkToSceneSpace } from './handPose';
 import { fillTrailSegments } from './trailMath';
+import type { ConstellationPaletteId } from './constellationPalettes';
+import { getConstellationHues } from './constellationPalettes';
 
 export interface ConstellationControls {
   starBrightness: number;      // 0..1 base star intensity
@@ -14,6 +16,7 @@ export interface ConstellationControls {
   nebulaRadius: number;        // 0.1..2.5 spatial radius of the nebula cloud
   nebulaParticleCount: number; // 50..1200 number of nebula particles ("spheres")
   nebulaParticleSize: number;  // 0.01..0.3 visual point size
+  palette: ConstellationPaletteId; // color palette (affects nebula/stars/lines hues)
   constellationOpacity: number; // 0..1 connecting lines
   cosmicDepth: number;         // 0..1 background star density
   twinkleSpeed: number;        // 0..2 star shimmer rate
@@ -45,6 +48,7 @@ export const DEFAULT_CONSTELLATION_CONTROLS: ConstellationControls = {
   nebulaRadius: 0.9,
   nebulaParticleCount: 260,
   nebulaParticleSize: 0.11,
+  palette: 'classic',
   constellationOpacity: 0.3,
   cosmicDepth: 0.6,
   twinkleSpeed: 1.0,
@@ -244,6 +248,8 @@ function NebulaCloud({
   prevLandmarks,
   intensity,
   hue,
+  saturation,
+  lightness,
   flocking,
   galaxy,
   trails,
@@ -253,6 +259,8 @@ function NebulaCloud({
   prevLandmarks: THREE.Vector3[];
   intensity: number;
   hue: number;
+  saturation: number;
+  lightness: number;
   flocking: FlockingProps;
   galaxy: GalaxyProps;
   trails: {
@@ -290,12 +298,23 @@ function NebulaCloud({
 
   // Store hue variations per particle (stable across re-renders)
   const hueOffsetsRef = useRef<Float32Array | null>(null);
+  // Store saturation/lightness variations per particle
+  const satOffsetsRef = useRef<Float32Array | null>(null);
+  const lightOffsetsRef = useRef<Float32Array | null>(null);
   if (!hueOffsetsRef.current) {
     hueOffsetsRef.current = new Float32Array(particleCount);
+    satOffsetsRef.current = new Float32Array(particleCount);
+    lightOffsetsRef.current = new Float32Array(particleCount);
     for (let i = 0; i < particleCount; i++) {
-      hueOffsetsRef.current[i] = (Math.random() - 0.5) * 0.3;
+      hueOffsetsRef.current[i] = (Math.random() - 0.5) * 0.25;
+      satOffsetsRef.current[i] = (Math.random() - 0.5) * 0.2;
+      lightOffsetsRef.current[i] = (Math.random() - 0.5) * 0.15;
     }
   }
+
+  // Track current color params to detect changes
+  const lastColorParamsRef = useRef({ hue: -1, saturation: -1, lightness: -1 });
+  const colorsDirtyRef = useRef(true);
 
   // Initialize particles ONCE (no dependencies that change)
   useMemo(() => {
@@ -320,22 +339,8 @@ function NebulaCloud({
       state.sizes[i] = 0.03 + Math.random() * 0.1;
     }
     state.initialized = true;
+    colorsDirtyRef.current = true; // ensure colors get set on first frame
   }, [particleCount, nebula.radius]);
-
-  // Update colors based on hue (runs when hue changes, but doesn't reset positions)
-  useMemo(() => {
-    const state = particleState.current;
-    const color = new THREE.Color();
-    const hueOffsets = hueOffsetsRef.current!;
-
-    for (let i = 0; i < particleCount; i++) {
-      const h = (hue + hueOffsets[i] + 1) % 1;
-      color.setHSL(h, 0.5 + Math.random() * 0.4, 0.35 + Math.random() * 0.35);
-      state.colors[i * 3] = color.r;
-      state.colors[i * 3 + 1] = color.g;
-      state.colors[i * 3 + 2] = color.b;
-    }
-  }, [hue, particleCount]);
 
   // Temp vectors for physics calculations
   const tmpVec = useMemo(() => new THREE.Vector3(), []);
@@ -358,6 +363,38 @@ function NebulaCloud({
   useFrame((_, delta) => {
     const state = particleState.current;
     if (!state.initialized || landmarks.length === 0) return;
+
+    // Check if color params changed - if so, recalculate all colors
+    const lastParams = lastColorParamsRef.current;
+    if (lastParams.hue !== hue || lastParams.saturation !== saturation || lastParams.lightness !== lightness) {
+      lastParams.hue = hue;
+      lastParams.saturation = saturation;
+      lastParams.lightness = lightness;
+      colorsDirtyRef.current = true;
+    }
+
+    if (colorsDirtyRef.current) {
+      const color = new THREE.Color();
+      const hueOffsets = hueOffsetsRef.current!;
+      const satOffsets = satOffsetsRef.current!;
+      const lightOffsets = lightOffsetsRef.current!;
+
+      for (let i = 0; i < particleCount; i++) {
+        const h = (hue + hueOffsets[i] + 1) % 1;
+        const s = Math.max(0, Math.min(1, saturation + satOffsets[i]));
+        const l = Math.max(0, Math.min(1, lightness + lightOffsets[i]));
+        color.setHSL(h, s, l);
+        state.colors[i * 3] = color.r;
+        state.colors[i * 3 + 1] = color.g;
+        state.colors[i * 3 + 2] = color.b;
+      }
+      colorsDirtyRef.current = false;
+
+      // Mark color buffer as needing update
+      if (geomRef.current && geomRef.current.attributes.color) {
+        (geomRef.current.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+      }
+    }
 
     // Clamp delta to prevent huge jumps
     const dt = Math.min(delta, 0.05);
@@ -707,7 +744,7 @@ function ConstellationScene({
   hands: Hand3DData[];
   controls: ConstellationControls;
 }) {
-  const { starBrightness, nebulaIntensity, nebulaRadius, nebulaParticleCount, nebulaParticleSize, constellationOpacity, cosmicDepth, twinkleSpeed,
+  const { starBrightness, nebulaIntensity, nebulaRadius, nebulaParticleCount, nebulaParticleSize, palette, constellationOpacity, cosmicDepth, twinkleSpeed,
     attractionStrength, separationStrength, separationRadius, motionRepulsion, damping, showHandSkeleton,
     coreAttraction, orbitStrength, armCount, armStrength, armWidth, spiralPitch, patternSpeed, turbulence,
     showNebulaTrails, trailLength, trailOpacity } = controls;
@@ -739,7 +776,6 @@ function ConstellationScene({
   // Nebula state per hand: current landmarks and previous frame landmarks
   const nebulaLandmarksRef = useRef<THREE.Vector3[][]>([[], []]);
   const prevNebulaLandmarksRef = useRef<THREE.Vector3[][]>([[], []]);
-  const nebulaHuesRef = useRef<number[]>([0.6, 0.0]); // Blue for left, red for right
   const nebulaCoreRef = useRef<THREE.Vector3[]>([new THREE.Vector3(), new THREE.Vector3()]);
   const nebulaAxisRef = useRef<THREE.Vector3[]>([new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 1)]);
   const opennessRef = useRef<number[]>([0, 0]); // 0..1, how open the hand is (used to scale orbit swirl)
@@ -750,6 +786,8 @@ function ConstellationScene({
   // Track pinch factor for brightness
   const pinchFactorRef = useRef<number[]>([0, 0]);
 
+  const getHandedness = (hand?: Hand3DData) => (hand?.handedness === 'Left' ? 'Left' : 'Right') as const;
+
   useFrame(() => {
     const t = clock.getElapsedTime();
     let starIdx = 0;
@@ -758,6 +796,9 @@ function ConstellationScene({
     for (let handIndex = 0; handIndex < 2; handIndex++) {
       const hand = hands[handIndex];
       if (!hand) continue;
+
+      const handedness = getHandedness(hand);
+      const hues = getConstellationHues({ paletteId: palette, handedness });
 
       const landmarks = hand.landmarks.map((lm) => landmarkToSceneSpace(lm, 2));
 
@@ -797,9 +838,6 @@ function ConstellationScene({
         }
       }
 
-      // Update hue based on handedness
-      nebulaHuesRef.current[handIndex] = hand.handedness === 'Left' ? 0.6 : 0.0;
-
       // Spread factor (average finger spread)
       const fingerTips = [4, 8, 12, 16, 20];
       let avgSpread = 0;
@@ -829,8 +867,8 @@ function ConstellationScene({
         const isTip = [4, 8, 12, 16, 20].includes(i);
         const tipBoost = isTip ? 1 + pinchFactor * 0.5 : 1;
 
-        // Base color (white-blue for left, white-gold for right)
-        const baseHue = hand.handedness === 'Left' ? 0.6 : 0.12;
+        // Base color (palette-driven)
+        const baseHue = hues.starHue;
         const color = new THREE.Color().setHSL(
           baseHue,
           0.3 + pinchFactor * 0.3,
@@ -872,7 +910,7 @@ function ConstellationScene({
         const dist = la.distanceTo(lb);
         const fade = Math.max(0.3, 1 - dist * 2);
         const lineColor = new THREE.Color().setHSL(
-          hand.handedness === 'Left' ? 0.55 : 0.08,
+          hues.lineHue,
           0.4,
           0.3 * fade * constellationOpacity
         );
@@ -921,6 +959,11 @@ function ConstellationScene({
   });
 
   const t = clock.getElapsedTime();
+
+  // Palette hues must be derived from React state, not refs updated in the render loop,
+  // so changing palette updates nebula colors immediately.
+  const hues0 = getConstellationHues({ paletteId: palette, handedness: getHandedness(hands[0]) });
+  const hues1 = getConstellationHues({ paletteId: palette, handedness: getHandedness(hands[1]) });
 
   // Compute effective nebula intensity per hand
   const getNebulaIntensity = (handIndex: number) => {
@@ -1014,7 +1057,9 @@ function ConstellationScene({
           landmarks={nebulaLandmarksRef.current[0]}
           prevLandmarks={prevNebulaLandmarksRef.current[0]}
           intensity={getNebulaIntensity(0)}
-          hue={nebulaHuesRef.current[0]}
+          hue={hues0.nebulaHue}
+          saturation={hues0.saturation}
+          lightness={hues0.lightness}
           flocking={flockingProps}
           galaxy={{
             coreCenter: nebulaCoreRef.current[0],
@@ -1040,7 +1085,9 @@ function ConstellationScene({
           landmarks={nebulaLandmarksRef.current[1]}
           prevLandmarks={prevNebulaLandmarksRef.current[1]}
           intensity={getNebulaIntensity(1)}
-          hue={nebulaHuesRef.current[1]}
+          hue={hues1.nebulaHue}
+          saturation={hues1.saturation}
+          lightness={hues1.lightness}
           flocking={flockingProps}
           galaxy={{
             coreCenter: nebulaCoreRef.current[1],

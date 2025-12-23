@@ -8,6 +8,7 @@ import { Hand3DVisual, type HandBoundingBox } from '@/components/hand-tracking/H
 import { PrismHandVisual, type PrismHandControls, DEFAULT_PRISM_HAND_CONTROLS } from '@/components/hand-tracking/PrismHandVisual';
 import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS } from '@/components/hand-tracking/OneLineHandVisual';
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
+import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getVisualConfig } from '../../visuals-config';
@@ -437,6 +438,32 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Color palette</span>
+                        <span className="font-mono">{constellationControls.palette}</span>
+                      </div>
+                      <select
+                        value={constellationControls.palette}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setConstellationControls((c) => ({
+                            ...c,
+                            palette: isConstellationPaletteId(next) ? next : c.palette,
+                          }));
+                        }}
+                        className="w-full px-2 py-1 rounded bg-white border border-gray-200 text-sm"
+                      >
+                        {CONSTELLATION_PALETTES.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {CONSTELLATION_PALETTES.find((p) => p.id === constellationControls.palette)?.description}
+                      </div>
+                    </div>
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
                       <input
                         type="checkbox"

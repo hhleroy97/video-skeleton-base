@@ -109,6 +109,19 @@ Your hand as a cosmos: 21 dim stars floating in deep space, with nebulae bloomin
   - Spreading fingers reveals more distant cosmic structure
 - **Controls**:
   - **Star Brightness**: base intensity of the landmark stars
+  - **Color palette**: choose different hue pairings for the nebula + stars + lines
+    - *Classic*: Blue/cool vs warm/gold (original)
+    - *Aurora*: Emerald greens and deep violets
+    - *Sunset*: Fiery oranges and magentas
+    - *Neon*: Vivid cyan and magenta (synthwave)
+    - *Cyberpunk*: Deep blue/purple with hot pink (dark neon)
+    - *Toxic*: Acid green and radioactive yellow
+    - *Ember*: Molten reds, oranges, and golds
+    - *Sakura*: Soft cherry blossom pinks
+    - *Electric*: Bright blue and electric yellow
+    - *Ocean*: Deep teals, aquas, and rich blues
+    - *Rainbow*: Full spectrum (warm left, cool right)
+    - *Void*: Near-monochrome violet
   - **Nebula Intensity**: visibility of the particle cloud around the palm
   - **Nebula Radius**: how large the nebula cloud is around the hand
   - **Nebula Count**: number of nebula particles (“spheres”)
@@ -120,7 +133,7 @@ Your hand as a cosmos: 21 dim stars floating in deep space, with nebulae bloomin
   - **Flocking Physics**: attraction/separation/motion push/damping
   - **Galaxy Field**: core pull, orbit swirl, spiral arms + turbulence
   - **Nebula trails**: draws short additive trails for nebula particles (length/opacity controls)
-- Left hand = blue/cool hues; Right hand = warm/gold hues
+- **Palette notes**: palettes keep left/right distinct (unless the palette intentionally unifies them).
 
 ## Features
 
