@@ -102,7 +102,7 @@ export async function createPoseDetector(config: PoseDetectorConfig = {}) {
   
   console.log('Creating new Pose instance...');
   const pose = new Pose({
-    locateFile: (file) => {
+    locateFile: (file: string) => {
       return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
     },
   });

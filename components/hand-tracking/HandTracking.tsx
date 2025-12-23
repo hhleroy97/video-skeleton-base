@@ -125,6 +125,10 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeVectorRef = useRef<FinalVector | null>(null);
+  const onPinchVectorRef = useRef<HandTrackingProps['onPinchVector']>(onPinchVector);
+  const onRightHandDistanceRef = useRef<HandTrackingProps['onRightHandDistance']>(onRightHandDistance);
+  const onHands3DRef = useRef<HandTrackingProps['onHands3D']>(onHands3D);
+  const leftHandedRef = useRef<boolean>(leftHanded);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
@@ -135,6 +139,20 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
     compositeVectorRef.current = compositeVector || null;
   }, [compositeVector]);
 
+  // Keep callback refs up to date without re-initializing the camera
+  useEffect(() => {
+    onPinchVectorRef.current = onPinchVector;
+  }, [onPinchVector]);
+  useEffect(() => {
+    onRightHandDistanceRef.current = onRightHandDistance;
+  }, [onRightHandDistance]);
+  useEffect(() => {
+    onHands3DRef.current = onHands3D;
+  }, [onHands3D]);
+  useEffect(() => {
+    leftHandedRef.current = leftHanded;
+  }, [leftHanded]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -143,6 +161,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
     let HandsClass: any = null;
     let CameraClass: any = null;
     let stream: MediaStream | null = null;
+    let initInProgress = false;
 
     // Simple drawing utilities (since DrawingUtils from CDN isn't working)
     const drawConnectors = (
@@ -246,8 +265,56 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
       });
     };
 
+    const cleanup = () => {
+      // Stop MediaPipe Camera
+      if (cameraInstance) {
+        try {
+          cameraInstance.stop();
+        } catch (e) {
+          console.error('Error stopping camera:', e);
+        }
+        cameraInstance = null;
+      }
+
+      // Stop MediaPipe Hands
+      if (handsInstance) {
+        try {
+          handsInstance.close();
+        } catch (e) {
+          console.error('Error closing hands:', e);
+        }
+        handsInstance = null;
+      }
+
+      // Stop video stream
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          track.stop();
+          console.log('Stopped video track:', track.kind);
+        });
+        stream = null;
+      }
+
+      // Clear video srcObject
+      const video = videoRef.current;
+      if (video) {
+        try {
+          video.pause();
+        } catch {
+          // ignore
+        }
+        video.srcObject = null;
+      }
+    };
+
     const init = async (): Promise<void> => {
       try {
+        if (initInProgress) return;
+        initInProgress = true;
+
+        // If we already have something running, stop it first.
+        cleanup();
+
         console.log('Waiting for MediaPipe scripts to load...');
         await loadMediaPipeScripts();
         console.log('MediaPipe scripts loaded.');
@@ -258,6 +325,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
           console.error('Video or canvas element not found');
           setError('Video or canvas element not found');
           setIsLoading(false);
+          initInProgress = false;
           return;
         }
 
@@ -266,6 +334,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
           console.error('Could not get canvas context');
           setError('Could not get canvas context');
           setIsLoading(false);
+          initInProgress = false;
           return;
         }
 
@@ -347,8 +416,8 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
             });
             
             // Callback with 3D hand data for visualization
-            if (onHands3D) {
-              const hands3D: Hand3DData[] = hands.map(hand => ({
+            if (onHands3DRef.current) {
+              const hands3D: Hand3DData[] = hands.map((hand: any) => ({
                 landmarks: hand.landmarks.map((lm: any) => ({
                   x: lm.x,
                   y: lm.y,
@@ -356,12 +425,12 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
                 })),
                 handedness: hand.handedness as 'Left' | 'Right' | 'Unknown',
               }));
-              onHands3D(hands3D);
+              onHands3DRef.current(hands3D);
             }
             
             // Determine which hand to use for phase angle control based on leftHanded toggle
-            const controlHandType = leftHanded ? 'Left' : 'Right';
-            const otherHandType = leftHanded ? 'Right' : 'Left';
+            const controlHandType = leftHandedRef.current ? 'Left' : 'Right';
+            const otherHandType = leftHandedRef.current ? 'Right' : 'Left';
             
             const controlHand = hands.find((hand: any) => hand.handedness === controlHandType);
             
@@ -457,16 +526,16 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
                 const distance = calculateDistance(thumbTip, indexTip);
                 
                 // Report distance to parent component
-                if (onRightHandDistance) {
-                  onRightHandDistance(distance);
+                if (onRightHandDistanceRef.current) {
+                  onRightHandDistanceRef.current(distance);
                 }
                 
                 // Circle overlay removed - no longer drawing the cyan circle
               }
             } else {
               // No right hand detected
-              if (onRightHandDistance) {
-                onRightHandDistance(null);
+              if (onRightHandDistanceRef.current) {
+                onRightHandDistanceRef.current(null);
               }
             }
             
@@ -491,8 +560,8 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
           }
           
           // Call callback with vector (or null if not pinching)
-          if (onPinchVector) {
-            onPinchVector(pinchVector);
+          if (onPinchVectorRef.current) {
+            onPinchVectorRef.current(pinchVector);
           }
           
           // Draw composite vector LAST so it appears on top of everything
@@ -599,7 +668,15 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
           
           // Set the stream to the video element
           video.srcObject = stream;
-          video.play();
+          try {
+            await video.play();
+          } catch (e: any) {
+            // Common when a new srcObject/load interrupts an in-flight play() call.
+            // We explicitly clean up before init(), so this should be rare, but safe to ignore.
+            if (e?.name !== 'AbortError') {
+              console.warn('video.play() failed:', e);
+            }
+          }
           
           // Wait for video to be ready
           await new Promise((resolve) => {
@@ -612,6 +689,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
           console.error('Camera permission error:', permError);
           setError(`Camera permission denied: ${permError.message}. Please allow camera access and refresh.`);
           setIsLoading(false);
+          initInProgress = false;
           return;
         }
 
@@ -639,51 +717,23 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
         }, 5000);
 
         console.log('Hand tracking initialization complete');
+        initInProgress = false;
       } catch (error: any) {
         console.error('Error initializing MediaPipe:', error);
         setError(error?.message || 'Failed to initialize hand tracking');
         setIsLoading(false);
+        initInProgress = false;
       }
     };
 
     // Store init function so it can be called manually
-    const initPromise = init();
+    init();
     setInitFunction(() => init);
 
     return () => {
-      // Stop MediaPipe Camera
-      if (cameraInstance) {
-        try {
-          cameraInstance.stop();
-        } catch (e) {
-          console.error('Error stopping camera:', e);
-        }
-      }
-      
-      // Stop MediaPipe Hands
-      if (handsInstance) {
-        try {
-          handsInstance.close();
-        } catch (e) {
-          console.error('Error closing hands:', e);
-        }
-      }
-      
-      // Stop video stream
-      if (stream) {
-        stream.getTracks().forEach(track => {
-          track.stop();
-          console.log('Stopped video track:', track.kind);
-        });
-      }
-      
-      // Clear video srcObject
-      const video = videoRef.current;
-      if (video) {
-        video.srcObject = null;
-      }
+      cleanup();
     };
-  }, [onPinchVector]);
+  }, []);
 
   const handleStartCamera = async () => {
     if (initFunction) {

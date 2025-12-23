@@ -2,9 +2,11 @@
 
 import { useRef, useMemo, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
+import { OrbitControls, PerspectiveCamera, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import { SkeletonUtils } from 'three-stdlib';
 import type { Hand3DData } from './HandTracking';
+import { computeHandlePoseFromHand, landmarkToSceneSpace, type HandModelOverlayMode } from './handPose';
 
 export interface HandBoundingBox {
   center: { x: number; y: number; z: number };
@@ -17,6 +19,8 @@ interface Hand3DVisualProps {
   hands: Hand3DData[];
   className?: string;
   onBoundingBoxes?: (boxes: HandBoundingBox[]) => void;
+  overlayMode?: HandModelOverlayMode;
+  modelUrl?: string;
 }
 
 // Hand connections based on MediaPipe hand landmarks (21 points)
@@ -39,7 +43,15 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
  * 3D Hand visualization component
  * Renders hand landmarks and connections in 3D space
  */
-function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundingBoxes?: (boxes: HandBoundingBox[]) => void }) {
+function Hand3DModel({
+  hands,
+  onBoundingBoxes,
+  showSkeleton = true,
+}: {
+  hands: Hand3DData[];
+  onBoundingBoxes?: (boxes: HandBoundingBox[]) => void;
+  showSkeleton?: boolean;
+}) {
   const groupRef = useRef<THREE.Group>(null);
   const handsRef = useRef<THREE.Group[]>([]);
   const landmarksRef = useRef<THREE.Mesh[][]>([]);
@@ -271,7 +283,7 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
       if (idx >= hands.length) {
         handGroup.visible = false;
       } else {
-        handGroup.visible = true;
+        handGroup.visible = showSkeleton;
       }
     });
     
@@ -286,11 +298,11 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
         return;
       }
       
-      // Ensure hand group and all children are visible
-      handGroup.visible = true;
+      // Ensure correct visibility for skeleton elements
+      handGroup.visible = showSkeleton;
       handGroup.traverse((child) => {
         if (child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.LineSegments) {
-          child.visible = true;
+          child.visible = showSkeleton;
         }
       });
       
@@ -426,7 +438,7 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
         smoothedPositions[0] = { x: smoothedX, y: smoothedY, z: smoothedZ };
         
         mesh.position.set(smoothedX, smoothedY, smoothedZ);
-        mesh.visible = true;
+        mesh.visible = showSkeleton;
         
         // Update material based on handedness - always assign to ensure correct material
         // Check if material needs to be updated by comparing color
@@ -474,7 +486,7 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
           positions.setXYZ(1, endX, endY, endZ);
           positions.needsUpdate = true;
           
-          line.visible = true;
+          line.visible = showSkeleton;
           
           // Update material based on handedness - always assign to ensure correct material
           // Check if material needs to be updated by comparing color
@@ -504,11 +516,420 @@ function Hand3DModel({ hands, onBoundingBoxes }: { hands: Hand3DData[]; onBoundi
   return <group ref={groupRef} />;
 }
 
+function HandModelOverlay({
+  hands,
+  modelUrl,
+  modelPositionOffset = [0, 0, 0],
+  modelRotationOffset = [0, 0, 0],
+  baseScale = 1,
+  forearmTwistOffsetRad = 0,
+}: {
+  hands: Hand3DData[];
+  modelUrl: string;
+  modelPositionOffset?: [number, number, number];
+  modelRotationOffset?: [number, number, number];
+  baseScale?: number;
+  forearmTwistOffsetRad?: number;
+}) {
+  const gltf = useGLTF(modelUrl);
+
+  // Render one model per detected hand (up to MediaPipe max 2)
+  return (
+    <>
+      {[0, 1].map((handIndex) => {
+        const hand = hands[handIndex];
+        return (
+          <HandModelInstance
+            key={`hand-model-${handIndex}`}
+            hand={hand}
+            modelScene={gltf.scene}
+            modelPositionOffset={modelPositionOffset}
+            modelRotationOffset={modelRotationOffset}
+            baseScale={baseScale}
+            forearmTwistOffsetRad={forearmTwistOffsetRad}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+type BoneCalibration = {
+  restQuat: THREE.Quaternion;
+  restDirParent: THREE.Vector3;
+};
+
+function normalizeBoneName(name: string) {
+  // Normalize across exporters/loaders that may alter punctuation.
+  // Examples: "thumb_01.R_08" vs "thumb_01_R_08" vs "Thumb_01.R_08"
+  // We intentionally strip ALL non-alphanumeric characters so variants like:
+  // - thumb_01.R_08
+  // - thumb_01R_08
+  // - thumb-01 r 08
+  // normalize to the same key.
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+type LandmarkSegment = { a: number; b: number };
+
+function inferLandmarkSegmentForBoneName(boneName: string): LandmarkSegment | null {
+  const key = normalizeBoneName(boneName);
+
+  // Avoid driving helper/control/end bones by default; they commonly cause double transforms / squish.
+  // We focus on deform bones (base + 01/02/03 chains).
+  if (key.includes('ctrl') || key.includes('end') || key.includes('tip')) return null;
+
+  const finger =
+    key.includes('thumb')
+      ? 'thumb'
+      : key.includes('index')
+        ? 'index'
+        : key.includes('middle')
+          ? 'middle'
+          : key.includes('ring')
+            ? 'ring'
+            : key.includes('pinky')
+              ? 'pinky'
+              : null;
+
+  if (!finger) return null;
+
+  const base: Record<typeof finger, LandmarkSegment> = {
+    thumb: { a: 0, b: 1 }, // wrist -> thumb CMC
+    index: { a: 0, b: 5 }, // wrist -> index MCP
+    middle: { a: 0, b: 9 },
+    ring: { a: 0, b: 13 },
+    pinky: { a: 0, b: 17 },
+  };
+
+  const seg1: Record<typeof finger, LandmarkSegment> = {
+    thumb: { a: 1, b: 2 },
+    index: { a: 5, b: 6 },
+    middle: { a: 9, b: 10 },
+    ring: { a: 13, b: 14 },
+    pinky: { a: 17, b: 18 },
+  };
+
+  const seg2: Record<typeof finger, LandmarkSegment> = {
+    thumb: { a: 2, b: 3 },
+    index: { a: 6, b: 7 },
+    middle: { a: 10, b: 11 },
+    ring: { a: 14, b: 15 },
+    pinky: { a: 18, b: 19 },
+  };
+
+  const seg3: Record<typeof finger, LandmarkSegment> = {
+    thumb: { a: 3, b: 4 },
+    index: { a: 7, b: 8 },
+    middle: { a: 11, b: 12 },
+    ring: { a: 15, b: 16 },
+    pinky: { a: 19, b: 20 },
+  };
+
+  // Prefer explicit base control
+  if (key.includes('base')) return base[finger];
+
+  // Fallback: attempt to infer by segment numbers that appear in the name
+  if (key.includes('03')) return seg3[finger];
+  if (key.includes('02')) return seg2[finger];
+  if (key.includes('01')) return seg1[finger];
+
+  return null;
+}
+
+function HandModelInstance({
+  hand,
+  modelScene,
+  modelPositionOffset,
+  modelRotationOffset,
+  baseScale,
+  forearmTwistOffsetRad,
+}: {
+  hand: Hand3DData | undefined;
+  modelScene: THREE.Object3D;
+  modelPositionOffset: [number, number, number];
+  modelRotationOffset: [number, number, number];
+  baseScale: number;
+  forearmTwistOffsetRad: number;
+}) {
+  const rootRef = useRef<THREE.Group>(null);
+  // IMPORTANT: Skinned meshes must be cloned with SkeletonUtils, not Object3D.clone(true),
+  // otherwise bones/skeleton bindings can break and the mesh won't deform.
+  const instance = useMemo(() => SkeletonUtils.clone(modelScene) as THREE.Object3D, [modelScene]);
+  const skinnedRef = useRef<THREE.SkinnedMesh | null>(null);
+  const bonesRef = useRef<Map<string, THREE.Bone>>(new Map());
+  const bonesByNormRef = useRef<Map<string, THREE.Bone>>(new Map());
+  const calibRef = useRef<Map<string, BoneCalibration>>(new Map());
+  const calibByBoneRef = useRef<Map<THREE.Bone, BoneCalibration & LandmarkSegment>>(new Map());
+  const weightedBonesRef = useRef<Set<THREE.Bone>>(new Set());
+  const orderedCalibratedBonesRef = useRef<THREE.Bone[]>([]);
+  const didCalibrateRef = useRef(false);
+  const didLogDebugRef = useRef(false);
+
+  const smoothedPos = useRef(new THREE.Vector3());
+  const smoothedQuat = useRef(new THREE.Quaternion());
+  const smoothedScale = useRef(1);
+  const hasInit = useRef(false);
+  const forearmTwistQuat = useMemo(() => new THREE.Quaternion(), []);
+
+  // One-time discovery of SkinnedMesh and bones on this instance
+  useEffect(() => {
+    skinnedRef.current = null;
+    bonesRef.current = new Map();
+    bonesByNormRef.current = new Map();
+    calibRef.current = new Map();
+    calibByBoneRef.current = new Map();
+    didCalibrateRef.current = false;
+    didLogDebugRef.current = false;
+
+    instance.traverse((obj) => {
+      const anyObj = obj as any;
+      if ((anyObj?.isSkinnedMesh || obj instanceof THREE.SkinnedMesh) && !skinnedRef.current) {
+        skinnedRef.current = obj as unknown as THREE.SkinnedMesh;
+      }
+    });
+
+    // Prefer the actual deform skeleton bones (guaranteed to affect the skinned mesh)
+    const skinned = skinnedRef.current as any;
+    if (skinned?.skeleton?.bones?.length) {
+      for (const bone of skinned.skeleton.bones as THREE.Bone[]) {
+        if (bone?.name) {
+          bonesRef.current.set(bone.name, bone);
+          bonesByNormRef.current.set(normalizeBoneName(bone.name), bone);
+        }
+      }
+
+      // Compute which bones actually influence vertices (non-zero skin weights)
+      weightedBonesRef.current = new Set();
+      const geom = (skinnedRef.current as any)?.geometry as THREE.BufferGeometry | undefined;
+      const skinIndexAttr = geom?.getAttribute?.('skinIndex') as any;
+      const skinWeightAttr = geom?.getAttribute?.('skinWeight') as any;
+      const bonesArr = (skinnedRef.current as any).skeleton.bones as THREE.Bone[];
+
+      if (skinIndexAttr?.array && skinWeightAttr?.array && Array.isArray(bonesArr) === false) {
+        // fall through
+      }
+      if (skinIndexAttr?.array && skinWeightAttr?.array && bonesArr?.length) {
+        const idx = skinIndexAttr.array as ArrayLike<number>;
+        const w = skinWeightAttr.array as ArrayLike<number>;
+        const used = new Set<number>();
+        const eps = 1e-6;
+        // attributes are vec4 per vertex
+        for (let i = 0; i < w.length; i++) {
+          if (w[i] > eps) used.add(idx[i] as number);
+        }
+        for (const jointIndex of used) {
+          const bone = bonesArr[jointIndex];
+          if (bone) weightedBonesRef.current.add(bone);
+        }
+      } else {
+        // If we can't read skin weights, allow all skeleton bones.
+        weightedBonesRef.current = new Set(bonesRef.current.values());
+      }
+      return;
+    }
+
+    // Fallback: traverse for bones (works for some rigs, but may include non-deform controls)
+    instance.traverse((obj) => {
+      if (obj instanceof THREE.Bone && obj.name) {
+        bonesRef.current.set(obj.name, obj);
+        bonesByNormRef.current.set(normalizeBoneName(obj.name), obj);
+      }
+    });
+  }, [instance]);
+
+  const getBone = (name: string) => {
+    return bonesRef.current.get(name) ?? bonesByNormRef.current.get(normalizeBoneName(name));
+  };
+
+  useFrame(() => {
+    const root = rootRef.current;
+    if (!root || !hand) {
+      if (root) root.visible = false;
+      hasInit.current = false;
+      didCalibrateRef.current = false;
+      return;
+    }
+
+    // For a full rigged hand, anchoring at the wrist is usually better than pinch midpoint.
+    const pose = computeHandlePoseFromHand(hand, { depthScale: 2, scaleMultiplier: 1, anchor: 'wrist' });
+    if (!pose) {
+      root.visible = false;
+      hasInit.current = false;
+      return;
+    }
+
+    root.visible = true;
+
+    // Smooth transform to reduce jitter (separate from landmark smoothing)
+    const alpha = 0.25;
+    if (!hasInit.current) {
+      smoothedPos.current.copy(pose.position);
+      smoothedQuat.current.copy(pose.quaternion);
+      smoothedScale.current = pose.scale;
+      hasInit.current = true;
+    } else {
+      smoothedPos.current.lerp(pose.position, alpha);
+      smoothedQuat.current.slerp(pose.quaternion, alpha);
+      smoothedScale.current = THREE.MathUtils.lerp(smoothedScale.current, pose.scale, alpha);
+    }
+
+    root.position.copy(smoothedPos.current);
+    root.quaternion.copy(smoothedQuat.current);
+    // Apply a twist around the tracked forearm axis (hand-local Y in our basis).
+    if (forearmTwistOffsetRad) {
+      forearmTwistQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), forearmTwistOffsetRad);
+      root.quaternion.multiply(forearmTwistQuat);
+    }
+    root.scale.setScalar(smoothedScale.current * baseScale);
+
+    // Drive finger bones if this GLB is rigged (SkinnedMesh + bones)
+    if (skinnedRef.current && bonesRef.current.size > 0) {
+      // Update matrices so matrixWorld is correct before converting to parent space
+      root.updateWorldMatrix(true, true);
+
+      // Calibrate once, after we're mounted into the scene graph
+      if (!didCalibrateRef.current) {
+        calibRef.current = new Map();
+        calibByBoneRef.current = new Map();
+
+        const parentInv = new THREE.Matrix4();
+        const boneW = new THREE.Vector3();
+        const childW = new THREE.Vector3();
+
+        // Calibrate as many bones as possible by name heuristics to MediaPipe segments.
+        // This won't be mathematically "1:1" (MediaPipe has 21 points), but it will drive
+        // the deform finger bones consistently.
+        for (const bone of bonesRef.current.values()) {
+          // Only drive bones that actually affect the mesh (avoid helper/control bones)
+          if (weightedBonesRef.current.size && !weightedBonesRef.current.has(bone)) continue;
+
+          const seg = inferLandmarkSegmentForBoneName(bone.name);
+          if (!seg) continue;
+
+          const parent = bone.parent as THREE.Object3D | null;
+          if (!parent) continue;
+
+          parentInv.copy(parent.matrixWorld).invert();
+          bone.getWorldPosition(boneW);
+          const boneP = boneW.clone().applyMatrix4(parentInv);
+
+          // Use first child bone direction when available; otherwise use parent->bone direction
+          const childBone = bone.children.find((c) => c instanceof THREE.Bone) as THREE.Bone | undefined;
+          let dir: THREE.Vector3;
+          if (childBone) {
+            childBone.getWorldPosition(childW);
+            const childP = childW.clone().applyMatrix4(parentInv);
+            dir = childP.sub(boneP);
+          } else {
+            dir = boneP.clone(); // parent origin is (0,0,0) in parent space
+          }
+
+          if (dir.lengthSq() < 1e-10) continue;
+          dir.normalize();
+
+          const calib = { restQuat: bone.quaternion.clone(), restDirParent: dir, a: seg.a, b: seg.b };
+          calibByBoneRef.current.set(bone, calib);
+        }
+
+        // Build a stable update order: parents first so child parent-space transforms are correct.
+        const depthOf = (b: THREE.Object3D) => {
+          let d = 0;
+          let cur: THREE.Object3D | null = b;
+          while (cur?.parent) {
+            d++;
+            cur = cur.parent;
+          }
+          return d;
+        };
+        orderedCalibratedBonesRef.current = Array.from(calibByBoneRef.current.keys()).sort(
+          (a, b) => depthOf(a) - depthOf(b)
+        );
+
+        didCalibrateRef.current = orderedCalibratedBonesRef.current.length > 0;
+
+        if (!didLogDebugRef.current) {
+          didLogDebugRef.current = true;
+          console.log('[HandModelInstance] bones:', bonesRef.current.size, 'calibrated:', calibByBoneRef.current.size);
+          console.log('[HandModelInstance] weightedBones:', weightedBonesRef.current.size);
+        }
+      }
+
+      const tmpA = new THREE.Vector3();
+      const tmpB = new THREE.Vector3();
+      const tmpDir = new THREE.Vector3();
+      const tmpQuat = new THREE.Quaternion();
+      const targetQuat = new THREE.Quaternion();
+      // Faster bone response so fingers can reach the pose
+      const alphaBone = 0.7;
+
+      // Ensure world matrices reflect the current pose before computing parent-space transforms.
+      skinnedRef.current.updateWorldMatrix(true, true);
+
+      for (const bone of orderedCalibratedBonesRef.current) {
+        const calib = calibByBoneRef.current.get(bone);
+        if (!calib) continue;
+        const parent = bone.parent as THREE.Object3D | null;
+        if (!parent) continue;
+
+        const lmA = hand.landmarks[calib.a];
+        const lmB = hand.landmarks[calib.b];
+        if (!lmA || !lmB) continue;
+
+        // Landmark positions in scene/world space
+        tmpA.copy(landmarkToSceneSpace(lmA, 2));
+        tmpB.copy(landmarkToSceneSpace(lmB, 2));
+
+        // Convert both points into the bone-parent space
+        const parentInv = new THREE.Matrix4().copy(parent.matrixWorld).invert();
+        tmpA.applyMatrix4(parentInv);
+        tmpB.applyMatrix4(parentInv);
+        tmpDir.subVectors(tmpB, tmpA);
+        if (tmpDir.lengthSq() < 1e-10) continue;
+        tmpDir.normalize();
+
+        // Rotate bone so its rest forward direction matches the target direction
+        tmpQuat.setFromUnitVectors(calib.restDirParent, tmpDir);
+        targetQuat.copy(tmpQuat).multiply(calib.restQuat);
+
+        // Smooth
+        bone.quaternion.slerp(targetQuat, alphaBone);
+
+        // Update matrices so children compute parent-space correctly within this same frame.
+        bone.updateWorldMatrix(false, false);
+      }
+    }
+  });
+
+  return (
+    <group ref={rootRef}>
+      <group position={modelPositionOffset} rotation={modelRotationOffset}>
+        <primitive object={instance} />
+      </group>
+    </group>
+  );
+}
+
 /**
  * 3D Hand Visualization Component
  * Displays hand landmarks in 3D space using Three.js
  */
-export function Hand3DVisual({ hands, className = '', onBoundingBoxes }: Hand3DVisualProps) {
+export function Hand3DVisual({
+  hands,
+  className = '',
+  onBoundingBoxes,
+  overlayMode = 'skeleton',
+  modelUrl = '/models/rigged_hand.glb',
+}: Hand3DVisualProps) {
+  const defaultModelRotationOffset: [number, number, number] = [0, 0, 0];
+  // User-requested: rotate 90° clockwise around the forearm axis for the bundled rigged hand.
+  // Forearm axis is the hand-local Y defined by our pose basis (wrist -> middle MCP).
+  const defaultForearmTwistOffsetRad = modelUrl.includes('rigged_hand') ? -Math.PI / 2 : 0;
+
   return (
     <div className={`w-full h-full bg-white ${className}`}>
       <Canvas
@@ -531,8 +952,18 @@ export function Hand3DVisual({ hands, className = '', onBoundingBoxes }: Hand3DV
         <directionalLight position={[-5, -5, -5]} intensity={0.5} />
         <pointLight position={[0, 0, 5]} intensity={0.8} />
         
-        {/* 3D Hand Model */}
-        <Hand3DModel hands={hands} onBoundingBoxes={onBoundingBoxes} />
+        {/* Skeleton / bounds tracker (kept mounted for bbox callback; can be hidden) */}
+        <Hand3DModel hands={hands} onBoundingBoxes={onBoundingBoxes} showSkeleton={overlayMode === 'skeleton'} />
+
+        {/* GLB model overlay */}
+        {overlayMode === 'model' && (
+          <HandModelOverlay
+            hands={hands}
+            modelUrl={modelUrl}
+            modelRotationOffset={defaultModelRotationOffset}
+            forearmTwistOffsetRad={defaultForearmTwistOffsetRad}
+          />
+        )}
         
         {/* Grid helper */}
         <gridHelper args={[2, 20, 0x444444, 0x222222]} />
@@ -553,3 +984,6 @@ export function Hand3DVisual({ hands, className = '', onBoundingBoxes }: Hand3DV
     </div>
   );
 }
+
+// Warm the GLTF cache for the default location
+useGLTF.preload('/models/rigged_hand.glb');

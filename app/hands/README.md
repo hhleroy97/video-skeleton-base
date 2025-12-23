@@ -59,6 +59,68 @@ Create your visualization component in `/components/hand-tracking/` following th
 - `PinchControlled3D` - 3D orbital system visualization
 - `PinchControlledVisual` - 2D visual element (to be implemented)
 - `FinalVectorVisual` - Vector-based visualization (to be implemented)
+- `Hand3DVisual` - 3D hand landmark scene (skeleton or GLB model overlay)
+
+## Hand3DVisual GLB Overlay (viz3)
+
+To render a real 3D model instead of just the landmark skeleton:
+
+- **Drop your GLB here**: `public/models/rigged_hand.glb`
+- **It will be served at**: `/models/rigged_hand.glb`
+- **Switch view mode**:
+  - Fullscreen view: top-right buttons **Skeleton / Model**
+  - Control panel: **Skeleton / Model** buttons above the 3D preview
+
+By default, the rigged model is positioned at the **wrist** (landmark 0), oriented using a **palm basis**, and (if bones are present) the fingers are driven from MediaPipe joint directions.
+
+## Prism Hand (viz4)
+
+An impressionistic “glass/prism” hand made from refractive shards along the hand bones.
+
+- **Route**: `/hands/viz4`
+- **Control panel**: `/hands/viz4/control-panel`
+- **Interaction**: pinch to intensify the refraction/clarity (subtle material change)
+- **Controls**:
+  - Fullscreen (`/hands/viz4`): top-right sliders (Spin, Twist, Hue speed, Opacity, Reset)
+  - Control panel (`/hands/viz4/control-panel`): “Prism Controls” card
+
+## One Unbroken Line (viz5)
+
+A minimalist "Picasso-style" continuous stroke that threads through all 21 landmarks.
+
+- **Route**: `/hands/viz5`
+- **Control panel**: `/hands/viz5/control-panel`
+- **Interaction**: pinch affects color saturation; movement is captured in real-time
+- **Controls**:
+  - **Noise Amount**: perpendicular displacement (fractal-like wobble)
+  - **Noise Scale**: frequency of the noise along the path
+  - **Draw Speed**: 0 = instant drawing; higher = animated reveal (line "traces" itself)
+  - **Line Width**: stroke thickness
+- Hue drifts over time and along the path for a living gradient
+
+## Constellation / Pocket Universe (viz6)
+
+Your hand as a cosmos: 21 dim stars floating in deep space, with nebulae blooming as you move.
+
+- **Route**: `/hands/viz6`
+- **Control panel**: `/hands/viz6/control-panel`
+- **Interaction**:
+  - Pinch brightens stars (nebula brightness stays stable)
+  - Spreading fingers reveals more distant cosmic structure
+- **Controls**:
+  - **Star Brightness**: base intensity of the landmark stars
+  - **Nebula Intensity**: visibility of the particle cloud around the palm
+  - **Nebula Radius**: how large the nebula cloud is around the hand
+  - **Nebula Count**: number of nebula particles (“spheres”)
+  - **Nebula Particle Size**: visual size of the nebula particles
+  - **Constellation Lines**: opacity of connecting lines between landmarks
+  - **Cosmic Depth**: background star density (how deep the universe feels)
+  - **Twinkle Speed**: star shimmer rate
+  - **Show hand skeleton**: overlays a brighter hand skeleton on top of the scene
+  - **Flocking Physics**: attraction/separation/motion push/damping
+  - **Galaxy Field**: core pull, orbit swirl, spiral arms + turbulence
+  - **Nebula trails**: draws short additive trails for nebula particles (length/opacity controls)
+- Left hand = blue/cool hues; Right hand = warm/gold hues
 
 ## Features
 
