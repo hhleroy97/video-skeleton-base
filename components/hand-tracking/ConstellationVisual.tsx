@@ -359,6 +359,7 @@ function NebulaCloud({
   const trailsGeomRef = useRef<THREE.BufferGeometry>(null);
   const trailsHistoryRef = useRef<Float32Array | null>(null);
   const trailsSegmentsRef = useRef<Float32Array | null>(null);
+  const trailsColorsRef = useRef<Float32Array | null>(null);
   const lastTrailLengthRef = useRef<number>(0);
 
   // Fixed timestep accumulator for consistent physics
@@ -680,10 +681,12 @@ function NebulaCloud({
     // Trails update (write into history, then build segments)
     if (trails.enabled && trails.length >= 2) {
       const L = Math.min(40, Math.max(2, Math.floor(trails.length)));
-      if (lastTrailLengthRef.current !== L || !trailsHistoryRef.current || !trailsSegmentsRef.current) {
+      const numSegments = particleCount * (L - 1) * 2 * 3;
+      if (lastTrailLengthRef.current !== L || !trailsHistoryRef.current || !trailsSegmentsRef.current || !trailsColorsRef.current || trailsColorsRef.current.length !== numSegments) {
         lastTrailLengthRef.current = L;
         trailsHistoryRef.current = new Float32Array(particleCount * L * 3);
-        trailsSegmentsRef.current = new Float32Array(particleCount * (L - 1) * 2 * 3);
+        trailsSegmentsRef.current = new Float32Array(numSegments);
+        trailsColorsRef.current = new Float32Array(numSegments);
         // Seed with current positions (so first frame doesn't draw huge lines)
         for (let p = 0; p < particleCount; p++) {
           const px = state.positions[p * 3];
@@ -700,6 +703,7 @@ function NebulaCloud({
 
       const history = trailsHistoryRef.current!;
       const segs = trailsSegmentsRef.current!;
+      const trailColors = trailsColorsRef.current!;
 
       // Shift history back by one for each particle using copyWithin, then write newest at slot 0
       const stride = L * 3;
@@ -720,13 +724,41 @@ function NebulaCloud({
         outSegments: segs,
       });
 
+      // Assign particle colors to trail segments
+      // Each particle has (L - 1) segments, each segment has 2 vertices
+      for (let p = 0; p < particleCount; p++) {
+        const particleColorR = state.colors[p * 3];
+        const particleColorG = state.colors[p * 3 + 1];
+        const particleColorB = state.colors[p * 3 + 2];
+        const segsPerParticle = L - 1;
+        const colorBase = p * segsPerParticle * 2 * 3;
+        
+        // Assign the particle's color to both vertices of each segment
+        for (let s = 0; s < segsPerParticle; s++) {
+          const colorOffset = colorBase + s * 2 * 3;
+          // Start vertex color
+          trailColors[colorOffset] = particleColorR;
+          trailColors[colorOffset + 1] = particleColorG;
+          trailColors[colorOffset + 2] = particleColorB;
+          // End vertex color (same for now, could interpolate if desired)
+          trailColors[colorOffset + 3] = particleColorR;
+          trailColors[colorOffset + 4] = particleColorG;
+          trailColors[colorOffset + 5] = particleColorB;
+        }
+      }
+
       if (trailsGeomRef.current) {
         const posAttr = trailsGeomRef.current.attributes.position as THREE.BufferAttribute;
+        const colorAttr = trailsGeomRef.current.attributes.color as THREE.BufferAttribute;
         // Only update if buffer sizes match; when trail length changes, the geometry
         // will be recreated on next render cycle with the new size
         if (posAttr.array.length === segs.length) {
           posAttr.array.set(segs);
           posAttr.needsUpdate = true;
+          if (colorAttr && colorAttr.array.length === trailColors.length) {
+            colorAttr.array.set(trailColors);
+            colorAttr.needsUpdate = true;
+          }
         }
       }
     }
@@ -756,9 +788,17 @@ function NebulaCloud({
                 3,
               ]}
             />
+            <bufferAttribute
+              attach="attributes-color"
+              args={[
+                trailsColorsRef.current ??
+                  new Float32Array(particleCount * (Math.min(40, Math.max(2, Math.floor(trails.length))) - 1) * 2 * 3),
+                3,
+              ]}
+            />
           </bufferGeometry>
           <lineBasicMaterial
-            color="#ffffff"
+            vertexColors
             transparent
             opacity={Math.max(0, Math.min(1, trails.opacity)) * intensity}
             depthWrite={false}
