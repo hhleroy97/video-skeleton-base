@@ -11,6 +11,7 @@ import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_
 import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
+import { ConfigSaveLoadCompact } from '@/components/hand-tracking/ConfigSaveLoadCompact';
 import { getVisualConfig } from '../visuals-config';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -323,6 +324,11 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
                 Reset
               </button>
               <div className="text-[11px] text-gray-300">Pinch still intensifies twist/clarity.</div>
+              <ConfigSaveLoadCompact
+                visualId={visualId}
+                currentControls={prismControls}
+                onLoadConfig={(controls) => setPrismControls(controls as typeof prismControls)}
+              />
             </div>
           </div>
         </div>
@@ -409,6 +415,11 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
               >
                 Reset
               </button>
+              <ConfigSaveLoadCompact
+                visualId={visualId}
+                currentControls={oneLineControls}
+                onLoadConfig={(controls) => setOneLineControls(controls as typeof oneLineControls)}
+              />
             </div>
           </div>
         </div>
@@ -842,6 +853,11 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
                 Reset
               </button>
               <div className="text-[11px] text-gray-400">Open hand increases orbit swirl. Pinch still brightens stars.</div>
+              <ConfigSaveLoadCompact
+                visualId={visualId}
+                currentControls={constellationControls}
+                onLoadConfig={(controls) => setConstellationControls(controls as typeof constellationControls)}
+              />
             </div>
           </div>
         </div>

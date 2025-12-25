@@ -54,6 +54,26 @@ Create your visualization component in `/components/hand-tracking/` following th
 - `/hands/[visualId]` - Fullscreen view of a specific visual
 - `/hands/[visualId]/control-panel` - Control panel for a specific visual
 
+## Saved Configurations
+
+All visuals with configurable controls (Prism Hand, One Line, and Constellation) support saving and loading custom configurations. This allows you to:
+
+- **Save your current settings** with a custom name for later use
+- **Load previously saved configurations** to quickly switch between different visual styles
+- **Delete saved configurations** you no longer need
+
+### How to Use
+
+1. Adjust the sliders and controls to your desired settings
+2. In the "Saved Configurations" card, enter a name for your configuration
+3. Click "Save" to store the current settings
+4. To load a saved configuration, click the "Load" button next to the configuration name
+5. To delete a configuration, click the "Delete" button
+
+### Storage
+
+Configurations are stored in your browser's localStorage, so they persist across page refreshes but are specific to your browser and device. Each visual type (viz4, viz5, viz6) maintains its own separate list of saved configurations.
+
 ## Available Component Types
 
 - `PinchControlled3D` - 3D orbital system visualization

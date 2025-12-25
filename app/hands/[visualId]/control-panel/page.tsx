@@ -12,6 +12,7 @@ import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/h
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfigSaveLoad } from '@/components/hand-tracking/ConfigSaveLoad';
 import { getVisualConfig } from '../../visuals-config';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -364,6 +365,14 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
               </Card>
             )}
 
+            {visualConfig.component === 'PrismHandVisual' && (
+              <ConfigSaveLoad
+                visualId={visualId}
+                currentControls={prismControls}
+                onLoadConfig={(controls) => setPrismControls(controls as typeof prismControls)}
+              />
+            )}
+
             {visualConfig.component === 'OneLineHandVisual' && (
               <Card>
                 <CardHeader>
@@ -444,6 +453,14 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                   </div>
                 </CardContent>
               </Card>
+            )}
+
+            {visualConfig.component === 'OneLineHandVisual' && (
+              <ConfigSaveLoad
+                visualId={visualId}
+                currentControls={oneLineControls}
+                onLoadConfig={(controls) => setOneLineControls(controls as typeof oneLineControls)}
+              />
             )}
 
             {visualConfig.component === 'ConstellationVisual' && (
@@ -866,6 +883,14 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                   </div>
                 </CardContent>
               </Card>
+            )}
+
+            {visualConfig.component === 'ConstellationVisual' && (
+              <ConfigSaveLoad
+                visualId={visualId}
+                currentControls={constellationControls}
+                onLoadConfig={(controls) => setConstellationControls(controls as typeof constellationControls)}
+              />
             )}
             
             {/* Bounding Box Data */}
