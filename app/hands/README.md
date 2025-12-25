@@ -107,6 +107,7 @@ Your hand as a cosmos: 21 dim stars floating in deep space, with nebulae bloomin
 - **Interaction**:
   - Pinch brightens stars (nebula brightness stays stable)
   - Spreading fingers reveals more distant cosmic structure
+  - If only one hand is detected, both nebula centers collapse to the remaining hand until the second hand returns
 - **Controls**:
   - **Star Brightness**: base intensity of the landmark stars
   - **Color palette**: choose different hue pairings for the nebula + stars + lines

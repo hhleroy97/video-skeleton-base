@@ -9,6 +9,7 @@ import { landmarkToSceneSpace } from './handPose';
 import { fillTrailSegments } from './trailMath';
 import type { ConstellationPaletteId } from './constellationPalettes';
 import { getConstellationHues } from './constellationPalettes';
+import { getCollapsedCenterHandIndex } from './constellationMerge';
 
 export interface ConstellationControls {
   starBrightness: number;      // 0..1 base star intensity
@@ -1036,6 +1037,12 @@ function ConstellationScene({
     return nebulaIntensity;
   };
 
+  // If exactly one hand is present, collapse both nebula centers to that one hand
+  // so all particles follow a single shared "center" until both hands return.
+  const collapseIndex = getCollapsedCenterHandIndex(hands);
+  const shouldCollapseCenters =
+    collapseIndex !== null && hasEverHadHandRef.current[0] && hasEverHadHandRef.current[1];
+
   return (
     <>
       {/* Deep space background */}
@@ -1119,19 +1126,29 @@ function ConstellationScene({
       {hasEverHadHandRef.current[0] && (
         <NebulaCloud
           key={`nebula-0-${nebulaParticleCount}-${nebulaRadius}-${nebulaParticleSize}`}
-          landmarks={hands[0] ? nebulaLandmarksRef.current[0] : []}
-          prevLandmarks={hands[0] ? prevNebulaLandmarksRef.current[0] : []}
+          landmarks={
+            hands[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 0]
+              ? nebulaLandmarksRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 0]
+              : []
+          }
+          prevLandmarks={
+            hands[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 0]
+              ? prevNebulaLandmarksRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 0]
+              : []
+          }
           intensity={getNebulaIntensity(0)}
           hue={hues0.nebulaHue}
           saturation={hues0.saturation}
           lightness={hues0.lightness}
           flocking={flockingProps}
           galaxy={{
-            coreCenter: nebulaCoreRef.current[0],
-            orbitAxis: nebulaAxisRef.current[0],
+            coreCenter: nebulaCoreRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 0],
+            orbitAxis: nebulaAxisRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 0],
             coreAttraction,
             // Open hand -> more swirl (closed -> gentle drift); use last known openness when hand gone
-            orbitStrength: orbitStrength * (0.15 + 0.85 * opennessRef.current[0]),
+            orbitStrength:
+              orbitStrength *
+              (0.15 + 0.85 * opennessRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 0]),
             armCount,
             armStrength,
             armWidth,
@@ -1147,18 +1164,28 @@ function ConstellationScene({
       {hasEverHadHandRef.current[1] && (
         <NebulaCloud
           key={`nebula-1-${nebulaParticleCount}-${nebulaRadius}-${nebulaParticleSize}`}
-          landmarks={hands[1] ? nebulaLandmarksRef.current[1] : []}
-          prevLandmarks={hands[1] ? prevNebulaLandmarksRef.current[1] : []}
+          landmarks={
+            hands[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 1]
+              ? nebulaLandmarksRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 1]
+              : []
+          }
+          prevLandmarks={
+            hands[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 1]
+              ? prevNebulaLandmarksRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 1]
+              : []
+          }
           intensity={getNebulaIntensity(1)}
           hue={hues1.nebulaHue}
           saturation={hues1.saturation}
           lightness={hues1.lightness}
           flocking={flockingProps}
           galaxy={{
-            coreCenter: nebulaCoreRef.current[1],
-            orbitAxis: nebulaAxisRef.current[1],
+            coreCenter: nebulaCoreRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 1],
+            orbitAxis: nebulaAxisRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 1],
             coreAttraction,
-            orbitStrength: orbitStrength * (0.15 + 0.85 * opennessRef.current[1]),
+            orbitStrength:
+              orbitStrength *
+              (0.15 + 0.85 * opennessRef.current[shouldCollapseCenters ? (collapseIndex as 0 | 1) : 1]),
             armCount,
             armStrength,
             armWidth,
