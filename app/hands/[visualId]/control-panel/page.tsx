@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { HandTracking, type PinchVector, type Hand3DData } from '@/components/hand-tracking/HandTracking';
 import { usePinchHistory, type FinalVector } from '@/components/hand-tracking/PinchHistoryTracker';
 import { PinchControlled3D } from '@/components/hand-tracking/PinchControlled3D';
@@ -9,6 +9,7 @@ import { PrismHandVisual, type PrismHandControls, DEFAULT_PRISM_HAND_CONTROLS } 
 import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS } from '@/components/hand-tracking/OneLineHandVisual';
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
 import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
+import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getVisualConfig } from '../../visuals-config';
@@ -27,6 +28,20 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
   const [hands3D, setHands3D] = useState<Hand3DData[]>([]);
   const [boundingBoxes, setBoundingBoxes] = useState<HandBoundingBox[]>([]);
   const [handOverlayMode, setHandOverlayMode] = useState<HandModelOverlayMode>('skeleton');
+
+  // Throttle hands3D updates to reduce React re-renders (perf optimization)
+  const hands3DRef = useRef<Hand3DData[]>([]);
+  const lastHands3DUpdateRef = useRef<number>(0);
+  const HANDS_UPDATE_INTERVAL = 33; // ~30 fps for React state updates
+
+  const handleHands3D = useCallback((hands: Hand3DData[]) => {
+    hands3DRef.current = hands;
+    const now = performance.now();
+    if (now - lastHands3DUpdateRef.current >= HANDS_UPDATE_INTERVAL) {
+      lastHands3DUpdateRef.current = now;
+      setHands3D(hands);
+    }
+  }, []);
   const [prismControls, setPrismControls] = useState<PrismHandControls>(DEFAULT_PRISM_HAND_CONTROLS);
   const [oneLineControls, setOneLineControls] = useState<OneLineHandControls>(DEFAULT_ONE_LINE_CONTROLS);
   const [constellationControls, setConstellationControls] = useState<ConstellationControls>(DEFAULT_CONSTELLATION_CONTROLS);
@@ -117,6 +132,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-8 lg:p-24">
+      <FpsOverlay position="bottom-left" />
       <div className="z-10 max-w-6xl w-full">
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -195,8 +211,8 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                 </CardHeader>
                 <CardContent>
                   <div className="relative">
-                    <HandTracking 
-                      onHands3D={setHands3D}
+                    <HandTracking
+                      onHands3D={handleHands3D}
                       leftHanded={leftHanded}
                     />
                   </div>

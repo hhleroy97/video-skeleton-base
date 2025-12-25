@@ -368,7 +368,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
 
         handsInstance.setOptions({
           maxNumHands: 2,
-          modelComplexity: 1,
+          modelComplexity: 0, // Use lite model for better performance (0 = lite, 1 = full)
           minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5,
         });
@@ -694,9 +694,18 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
         }
 
         // Initialize Camera with the video element that now has the stream
+        // Frame skipping for better performance: only process every 2nd frame
+        let frameCount = 0;
+        const FRAME_SKIP = 2; // Process every Nth frame (1 = every frame, 2 = every other, etc.)
+
         console.log('Initializing MediaPipe Camera...');
         cameraInstance = new CameraClass(video, {
           onFrame: async () => {
+            frameCount++;
+            // Skip frames for performance - MediaPipe is expensive
+            if (frameCount % FRAME_SKIP !== 0) {
+              return;
+            }
             await handsInstance.send({ image: video });
           },
           width: 640,

@@ -46,7 +46,7 @@ export const DEFAULT_CONSTELLATION_CONTROLS: ConstellationControls = {
   starBrightness: 0.8,
   nebulaIntensity: 0.5,
   nebulaRadius: 0.9,
-  nebulaParticleCount: 260,
+  nebulaParticleCount: 150, // Reduced from 260 for better performance
   nebulaParticleSize: 0.11,
   palette: 'classic',
   constellationOpacity: 0.3,
@@ -360,9 +360,25 @@ function NebulaCloud({
   const trailsSegmentsRef = useRef<Float32Array | null>(null);
   const lastTrailLengthRef = useRef<number>(0);
 
+  // Fixed timestep accumulator for consistent physics
+  const accumulatorRef = useRef(0);
+  const FIXED_DT = 1 / 60; // 60 Hz physics
+  const MAX_STEPS = 3; // Prevent spiral of death
+
+  // Spatial hash for O(n) flocking separation
+  const spatialHashRef = useRef<Map<string, number[]>>(new Map());
+
+  // Helper to compute spatial hash key
+  const getCellKey = (x: number, y: number, z: number, cellSize: number): string => {
+    const cx = Math.floor(x / cellSize);
+    const cy = Math.floor(y / cellSize);
+    const cz = Math.floor(z / cellSize);
+    return `${cx},${cy},${cz}`;
+  };
+
   useFrame((_, delta) => {
     const state = particleState.current;
-    if (!state.initialized || landmarks.length === 0) return;
+    if (!state.initialized) return;
 
     // Check if color params changed - if so, recalculate all colors
     const lastParams = lastColorParamsRef.current;
@@ -396,8 +412,10 @@ function NebulaCloud({
       }
     }
 
-    // Clamp delta to prevent huge jumps
-    const dt = Math.min(delta, 0.05);
+    // Fixed timestep accumulator
+    accumulatorRef.current += Math.min(delta, 0.1); // Cap incoming delta
+    let steps = 0;
+    const dt = FIXED_DT;
 
     // Physics constants from controls
     const { attractionStrength, separationStrength, separationRadius, motionRepulsion, damping } = flocking;
@@ -442,7 +460,7 @@ function NebulaCloud({
     tmpU.crossVectors(tmpAxis, tmpU).normalize(); // u ⟂ axis
     tmpV.crossVectors(tmpAxis, tmpU).normalize(); // v ⟂ axis and u
 
-    // Compute landmark velocities (for repulsion)
+    // Compute landmark velocities (for repulsion) - only once per frame
     const landmarkVelocities: THREE.Vector3[] = [];
     for (let li = 0; li < landmarks.length; li++) {
       const curr = landmarks[li];
@@ -455,7 +473,32 @@ function NebulaCloud({
       }
     }
 
-    // Update each particle
+    // Fixed timestep physics loop
+    while (accumulatorRef.current >= FIXED_DT && steps < MAX_STEPS) {
+      accumulatorRef.current -= FIXED_DT;
+      steps++;
+
+      // Build spatial hash for O(n) separation (cell size = separation radius)
+      const cellSize = separationRadius * 2;
+      const spatialHash = spatialHashRef.current;
+      spatialHash.clear();
+
+      for (let i = 0; i < particleCount; i++) {
+        const key = getCellKey(
+          state.positions[i * 3],
+          state.positions[i * 3 + 1],
+          state.positions[i * 3 + 2],
+          cellSize
+        );
+        let bucket = spatialHash.get(key);
+        if (!bucket) {
+          bucket = [];
+          spatialHash.set(key, bucket);
+        }
+        bucket.push(i);
+      }
+
+      // Update each particle
     for (let i = 0; i < particleCount; i++) {
       const px = state.positions[i * 3];
       const py = state.positions[i * 3 + 1];
@@ -565,26 +608,41 @@ function NebulaCloud({
         }
       }
 
-      // FLOCKING: Separation from other particles (prevents clumping)
-      for (let j = 0; j < particleCount; j++) {
-        if (i === j) continue;
-        
-        const ox = state.positions[j * 3];
-        const oy = state.positions[j * 3 + 1];
-        const oz = state.positions[j * 3 + 2];
-        
-        const dx = px - ox;
-        const dy = py - oy;
-        const dz = pz - oz;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        
-        if (distSq < separationRadius * separationRadius && distSq > 0.0001) {
-          const dist = Math.sqrt(distSq);
-          // Repel away from neighbor, stronger when closer
-          const separationMag = separationStrength * (1 - dist / separationRadius);
-          tmpForce.x += (dx / dist) * separationMag;
-          tmpForce.y += (dy / dist) * separationMag;
-          tmpForce.z += (dz / dist) * separationMag;
+      // FLOCKING: Separation from nearby particles using spatial hash (O(n) instead of O(n²))
+      const pCellX = Math.floor(px / cellSize);
+      const pCellY = Math.floor(py / cellSize);
+      const pCellZ = Math.floor(pz / cellSize);
+
+      // Check neighboring cells (3x3x3 = 27 cells max)
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const neighborKey = `${pCellX + dx},${pCellY + dy},${pCellZ + dz}`;
+            const bucket = spatialHash.get(neighborKey);
+            if (!bucket) continue;
+
+            for (const j of bucket) {
+              if (i === j) continue;
+
+              const ox = state.positions[j * 3];
+              const oy = state.positions[j * 3 + 1];
+              const oz = state.positions[j * 3 + 2];
+
+              const ddx = px - ox;
+              const ddy = py - oy;
+              const ddz = pz - oz;
+              const distSq = ddx * ddx + ddy * ddy + ddz * ddz;
+
+              if (distSq < separationRadius * separationRadius && distSq > 0.0001) {
+                const dist = Math.sqrt(distSq);
+                // Repel away from neighbor, stronger when closer
+                const separationMag = separationStrength * (1 - dist / separationRadius);
+                tmpForce.x += (ddx / dist) * separationMag;
+                tmpForce.y += (ddy / dist) * separationMag;
+                tmpForce.z += (ddz / dist) * separationMag;
+              }
+            }
+          }
         }
       }
 
@@ -615,7 +673,8 @@ function NebulaCloud({
       state.positions[i * 3] += state.velocities[i * 3] * dt;
       state.positions[i * 3 + 1] += state.velocities[i * 3 + 1] * dt;
       state.positions[i * 3 + 2] += state.velocities[i * 3 + 2] * dt;
-    }
+      }
+    } // End fixed timestep while loop
 
     // Trails update (write into history, then build segments)
     if (trails.enabled && trails.length >= 2) {
@@ -641,17 +700,13 @@ function NebulaCloud({
       const history = trailsHistoryRef.current!;
       const segs = trailsSegmentsRef.current!;
 
-      // Shift history back by one for each particle, then write newest at slot 0
+      // Shift history back by one for each particle using copyWithin, then write newest at slot 0
+      const stride = L * 3;
       for (let p = 0; p < particleCount; p++) {
-        const base = p * L * 3;
-        // shift [0..L-2] <- [1..L-1]
-        for (let i = L - 1; i >= 1; i--) {
-          const dst = base + i * 3;
-          const src = base + (i - 1) * 3;
-          history[dst] = history[src];
-          history[dst + 1] = history[src + 1];
-          history[dst + 2] = history[src + 2];
-        }
+        const base = p * stride;
+        // Shift: copy [base..base+(L-1)*3) to [base+3..base+L*3) (moves old data back by one slot)
+        history.copyWithin(base + 3, base, base + (L - 1) * 3);
+        // Write newest position at slot 0
         history[base] = state.positions[p * 3];
         history[base + 1] = state.positions[p * 3 + 1];
         history[base + 2] = state.positions[p * 3 + 2];
@@ -666,8 +721,12 @@ function NebulaCloud({
 
       if (trailsGeomRef.current) {
         const posAttr = trailsGeomRef.current.attributes.position as THREE.BufferAttribute;
-        posAttr.array.set(segs);
-        posAttr.needsUpdate = true;
+        // Only update if buffer sizes match; when trail length changes, the geometry
+        // will be recreated on next render cycle with the new size
+        if (posAttr.array.length === segs.length) {
+          posAttr.array.set(segs);
+          posAttr.needsUpdate = true;
+        }
       }
     }
 
@@ -686,7 +745,7 @@ function NebulaCloud({
   return (
     <group>
       {trails.enabled && trails.length >= 2 && (
-        <lineSegments>
+        <lineSegments key={`trails-${Math.floor(trails.length)}`}>
           <bufferGeometry ref={trailsGeomRef}>
             <bufferAttribute
               attach="attributes-position"
@@ -786,6 +845,9 @@ function ConstellationScene({
   // Track pinch factor for brightness
   const pinchFactorRef = useRef<number[]>([0, 0]);
 
+  // Track if each hand slot has ever had a hand (so nebula persists after hand leaves)
+  const hasEverHadHandRef = useRef<boolean[]>([false, false]);
+
   const getHandedness = (hand?: Hand3DData) => (hand?.handedness === 'Left' ? 'Left' : 'Right') as const;
 
   useFrame(() => {
@@ -796,6 +858,9 @@ function ConstellationScene({
     for (let handIndex = 0; handIndex < 2; handIndex++) {
       const hand = hands[handIndex];
       if (!hand) continue;
+
+      // Mark that this hand slot has been used at least once
+      hasEverHadHandRef.current[handIndex] = true;
 
       const handedness = getHandedness(hand);
       const hues = getConstellationHues({ paletteId: palette, handedness });
@@ -1050,12 +1115,12 @@ function ConstellationScene({
         </lineSegments>
       )}
 
-      {/* Nebula clouds around each hand */}
-      {hands[0] && nebulaLandmarksRef.current[0].length > 0 && (
+      {/* Nebula clouds around each hand - persist even when hand leaves */}
+      {hasEverHadHandRef.current[0] && (
         <NebulaCloud
           key={`nebula-0-${nebulaParticleCount}-${nebulaRadius}-${nebulaParticleSize}`}
-          landmarks={nebulaLandmarksRef.current[0]}
-          prevLandmarks={prevNebulaLandmarksRef.current[0]}
+          landmarks={hands[0] ? nebulaLandmarksRef.current[0] : []}
+          prevLandmarks={hands[0] ? prevNebulaLandmarksRef.current[0] : []}
           intensity={getNebulaIntensity(0)}
           hue={hues0.nebulaHue}
           saturation={hues0.saturation}
@@ -1065,7 +1130,7 @@ function ConstellationScene({
             coreCenter: nebulaCoreRef.current[0],
             orbitAxis: nebulaAxisRef.current[0],
             coreAttraction,
-            // Open hand -> more swirl (closed -> gentle drift)
+            // Open hand -> more swirl (closed -> gentle drift); use last known openness when hand gone
             orbitStrength: orbitStrength * (0.15 + 0.85 * opennessRef.current[0]),
             armCount,
             armStrength,
@@ -1079,11 +1144,11 @@ function ConstellationScene({
           nebula={{ radius: nebulaRadius, particleCount: nebulaParticleCount, particleSize: nebulaParticleSize }}
         />
       )}
-      {hands[1] && nebulaLandmarksRef.current[1].length > 0 && (
+      {hasEverHadHandRef.current[1] && (
         <NebulaCloud
           key={`nebula-1-${nebulaParticleCount}-${nebulaRadius}-${nebulaParticleSize}`}
-          landmarks={nebulaLandmarksRef.current[1]}
-          prevLandmarks={prevNebulaLandmarksRef.current[1]}
+          landmarks={hands[1] ? nebulaLandmarksRef.current[1] : []}
+          prevLandmarks={hands[1] ? prevNebulaLandmarksRef.current[1] : []}
           intensity={getNebulaIntensity(1)}
           hue={hues1.nebulaHue}
           saturation={hues1.saturation}

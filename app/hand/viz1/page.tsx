@@ -5,6 +5,7 @@ import { HandTracking, type PinchVector } from '@/components/hand-tracking/HandT
 import { usePinchHistory, type FinalVector } from '@/components/hand-tracking/PinchHistoryTracker';
 import { PinchControlled3D } from '@/components/hand-tracking/PinchControlled3D';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FpsOverlay } from '@/components/perf/FpsOverlay';
 
 export default function HandsPage() {
   const [pinchVector, setPinchVector] = useState<PinchVector | null>(null);
@@ -39,6 +40,7 @@ export default function HandsPage() {
 
   return (
     <main className="relative min-h-screen w-full overflow-hidden">
+      <FpsOverlay position="bottom-left" />
       {/* 3D Visual - positioned around the center, full screen */}
       <div className="absolute inset-0 z-0 w-full h-full">
         <PinchControlled3D vector={pinchVector} nodesPerOrbit={nodesPerOrbit} onPhaseAnglesChange={setPhaseAngles} className="h-full" />

@@ -141,3 +141,4 @@ Your hand as a cosmos: 21 dim stars floating in deep space, with nebulae bloomin
 - **Dynamic Routing**: Each visual gets its own route automatically
 - **Control Panels**: Each visual has a dedicated control panel with camera feed and data
 - **Shared State**: All visuals use the same hand tracking system
+- **FPS Overlay**: Fullscreen + control panel views show a small FPS counter (bottom-left) to quickly spot performance regressions

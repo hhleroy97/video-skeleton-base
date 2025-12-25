@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { HandTracking, type PinchVector, type Hand3DData } from '@/components/hand-tracking/HandTracking';
 import { usePinchHistory, type FinalVector } from '@/components/hand-tracking/PinchHistoryTracker';
 import { PinchControlled3D } from '@/components/hand-tracking/PinchControlled3D';
@@ -9,6 +9,7 @@ import { PrismHandVisual, type PrismHandControls, DEFAULT_PRISM_HAND_CONTROLS } 
 import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS } from '@/components/hand-tracking/OneLineHandVisual';
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
 import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
+import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { getVisualConfig } from '../visuals-config';
 import { notFound } from 'next/navigation';
@@ -25,6 +26,22 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
   const [visualId, setVisualId] = useState<string>('');
   const [hands3D, setHands3D] = useState<Hand3DData[]>([]);
   const [handOverlayMode, setHandOverlayMode] = useState<HandModelOverlayMode>('skeleton');
+
+  // Throttle hands3D updates to reduce React re-renders (perf optimization)
+  const hands3DRef = useRef<Hand3DData[]>([]);
+  const lastHands3DUpdateRef = useRef<number>(0);
+  const HANDS_UPDATE_INTERVAL = 33; // ~30 fps for React state updates (visuals read at 60fps via useFrame)
+
+  const handleHands3D = useCallback((hands: Hand3DData[]) => {
+    // Always update the ref (for immediate access by visuals)
+    hands3DRef.current = hands;
+    // Throttle React state updates to reduce re-renders
+    const now = performance.now();
+    if (now - lastHands3DUpdateRef.current >= HANDS_UPDATE_INTERVAL) {
+      lastHands3DUpdateRef.current = now;
+      setHands3D(hands);
+    }
+  }, []);
   const [prismControls, setPrismControls] = useState<PrismHandControls>(DEFAULT_PRISM_HAND_CONTROLS);
   const [oneLineControls, setOneLineControls] = useState<OneLineHandControls>(DEFAULT_ONE_LINE_CONTROLS);
   const [constellationControls, setConstellationControls] = useState<ConstellationControls>(DEFAULT_CONSTELLATION_CONTROLS);
@@ -103,6 +120,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-white">
+      <FpsOverlay position="bottom-left" />
       {/* Navigation bar */}
       <div className="absolute top-4 left-4 z-50 flex gap-2">
         <Link
@@ -157,8 +175,8 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' ? (
         // Small camera feed overlay for 3D hand visualization
         <div className="absolute bottom-4 right-4 z-50 w-48 h-36 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg">
-          <HandTracking 
-            onHands3D={setHands3D}
+          <HandTracking
+            onHands3D={handleHands3D}
             leftHanded={leftHanded}
             className="w-full h-full"
             hideRestartButton={true}

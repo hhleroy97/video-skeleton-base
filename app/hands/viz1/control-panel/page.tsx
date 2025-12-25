@@ -5,6 +5,7 @@ import { HandTracking, type PinchVector } from '@/components/hand-tracking/HandT
 import { usePinchHistory, type FinalVector } from '@/components/hand-tracking/PinchHistoryTracker';
 import { PinchControlled3D } from '@/components/hand-tracking/PinchControlled3D';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FpsOverlay } from '@/components/perf/FpsOverlay';
 
 export default function ControlPanelPage() {
   const [pinchVector, setPinchVector] = useState<PinchVector | null>(null);
@@ -39,6 +40,7 @@ export default function ControlPanelPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-8 lg:p-24">
+      <FpsOverlay position="bottom-left" />
       <div className="z-10 max-w-6xl w-full">
         <div className="mb-8 text-center">
           <h1 className="text-4xl font-bold mb-2">Hand Tracking Control Panel</h1>

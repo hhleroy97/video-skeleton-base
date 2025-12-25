@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { HandTracking, type PinchVector } from '@/components/hand-tracking/HandTracking';
 import { usePinchHistory, type FinalVector } from '@/components/hand-tracking/PinchHistoryTracker';
 import { PinchControlled3D } from '@/components/hand-tracking/PinchControlled3D';
+import { FpsOverlay } from '@/components/perf/FpsOverlay';
 
 export default function HandsPage() {
   const [pinchVector, setPinchVector] = useState<PinchVector | null>(null);
@@ -38,6 +39,7 @@ export default function HandsPage() {
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-black">
+      <FpsOverlay position="bottom-left" />
       {/* Full screen 3D visual */}
       <PinchControlled3D vector={pinchVector} nodesPerOrbit={nodesPerOrbit} onPhaseAnglesChange={setPhaseAngles} fullscreen={true} />
 
