@@ -889,7 +889,8 @@ function ConstellationScene({
   // Track if each hand slot has ever had a hand (so nebula persists after hand leaves)
   const hasEverHadHandRef = useRef<boolean[]>([false, false]);
 
-  const getHandedness = (hand?: Hand3DData) => (hand?.handedness === 'Left' ? 'Left' : 'Right') as const;
+  const getHandedness = (hand?: Hand3DData): 'Left' | 'Right' =>
+    hand?.handedness === 'Left' ? 'Left' : 'Right';
 
   useFrame(() => {
     const t = clock.getElapsedTime();

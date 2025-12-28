@@ -12,6 +12,7 @@ import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/h
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { ConfigSaveLoadCompact } from '@/components/hand-tracking/ConfigSaveLoadCompact';
+import { useTrackingSettings } from '@/components/providers/TrackingSettingsProvider';
 import { getVisualConfig } from '../visuals-config';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -27,6 +28,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
   const [visualId, setVisualId] = useState<string>('');
   const [hands3D, setHands3D] = useState<Hand3DData[]>([]);
   const [handOverlayMode, setHandOverlayMode] = useState<HandModelOverlayMode>('skeleton');
+  const { isHandTrackingEnabledForVisual, setHandTrackingEnabledForVisual, bodyTrackingEnabled } = useTrackingSettings();
 
   // Throttle hands3D updates to reduce React re-renders (perf optimization)
   const hands3DRef = useRef<Hand3DData[]>([]);
@@ -46,6 +48,18 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
   const [prismControls, setPrismControls] = useState<PrismHandControls>(DEFAULT_PRISM_HAND_CONTROLS);
   const [oneLineControls, setOneLineControls] = useState<OneLineHandControls>(DEFAULT_ONE_LINE_CONTROLS);
   const [constellationControls, setConstellationControls] = useState<ConstellationControls>(DEFAULT_CONSTELLATION_CONTROLS);
+
+  const handTrackingEnabled = visualId ? isHandTrackingEnabledForVisual(visualId) : true;
+
+  // If hand tracking is disabled for this visual, clear inputs so visuals stop reacting.
+  useEffect(() => {
+    if (handTrackingEnabled) return;
+    setHands3D([]);
+    setPinchVector(null);
+    setRightHandDistance(null);
+    setFinalVector(null);
+    setCurrentVector(null);
+  }, [handTrackingEnabled]);
   
   // Handle both sync and async params
   useEffect(() => {
@@ -125,13 +139,19 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       {/* Navigation bar */}
       <div className="absolute top-4 left-4 z-50 flex gap-2">
         <Link
-          href="/hands"
+          href="/"
           className="px-4 py-2 bg-gray-800/80 text-white rounded-lg hover:bg-gray-700/80 transition-colors backdrop-blur-sm"
         >
-          ← Back to Hands
+          ← Back
         </Link>
         <Link
-          href={`/hands/${visualId}/control-panel`}
+          href={`/${visualId}/final_view`}
+          className="px-4 py-2 bg-emerald-600/80 text-white rounded-lg hover:bg-emerald-700/80 transition-colors backdrop-blur-sm"
+        >
+          Final View
+        </Link>
+        <Link
+          href={`/${visualId}/control-panel`}
           className="px-4 py-2 bg-blue-600/80 text-white rounded-lg hover:bg-blue-700/80 transition-colors backdrop-blur-sm"
         >
           Control Panel
@@ -167,21 +187,35 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       {visualConfig.component === 'BasicHandTracking' ? (
         // Fullscreen hand tracking
         <div className="absolute inset-0 z-40">
-          <HandTracking 
-            leftHanded={leftHanded}
-            className="w-full h-full"
-            hideRestartButton={true}
-          />
+          {handTrackingEnabled ? (
+            <HandTracking
+              leftHanded={leftHanded}
+              enablePose={bodyTrackingEnabled}
+              className="w-full h-full"
+              hideRestartButton={true}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-black text-white">
+              Hand tracking is disabled for this visual.
+            </div>
+          )}
         </div>
       ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' ? (
         // Small camera feed overlay for 3D hand visualization
         <div className="absolute bottom-4 right-4 z-50 w-48 h-36 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg">
-          <HandTracking
-            onHands3D={handleHands3D}
-            leftHanded={leftHanded}
-            className="w-full h-full"
-            hideRestartButton={true}
-          />
+          {handTrackingEnabled ? (
+            <HandTracking
+              onHands3D={handleHands3D}
+              leftHanded={leftHanded}
+              enablePose={bodyTrackingEnabled}
+              className="w-full h-full"
+              hideRestartButton={true}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-black/70 text-white text-xs">
+              Hand tracking off
+            </div>
+          )}
         </div>
       ) : (
         // Circular camera feed overlay - centered (for other visuals)
@@ -190,14 +224,21 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
             <div className="absolute inset-0 rounded-full border-4 border-white/40"></div>
             <div className="relative w-full h-full rounded-full overflow-hidden border-2 border-gray-600 bg-black m-1 [&_canvas]:absolute [&_canvas]:inset-0 [&_canvas]:w-full [&_canvas]:h-full [&_canvas]:object-cover [&_canvas]:!border-0 [&_canvas]:!rounded-none">
               <div className="absolute inset-0 [&>div]:absolute [&>div]:inset-0 [&>div]:w-full [&>div]:h-full [&>div>div]:absolute [&>div>div]:inset-0 [&>div>div]:w-full [&>div>div]:h-full">
-                <HandTracking 
-                  onPinchVector={setPinchVector}
-                  compositeVector={currentVector || finalVector}
-                  onRightHandDistance={setRightHandDistance}
-                  leftHanded={leftHanded}
-                  className="!border-0 !rounded-none"
-                  hideRestartButton={true}
-                />
+                {handTrackingEnabled ? (
+                  <HandTracking
+                    onPinchVector={setPinchVector}
+                    compositeVector={currentVector || finalVector}
+                    onRightHandDistance={setRightHandDistance}
+                    leftHanded={leftHanded}
+                    enablePose={bodyTrackingEnabled}
+                    className="!border-0 !rounded-none"
+                    hideRestartButton={true}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-black/70 text-white text-sm">
+                    Hand tracking off
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -208,6 +249,15 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       {visualConfig.component === 'Hand3DVisual' ? (
         <div className="absolute top-4 right-4 z-50">
           <div className="bg-gray-800/80 backdrop-blur-sm rounded-lg p-3 space-y-3">
+            <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={handTrackingEnabled}
+                onChange={(e) => setHandTrackingEnabledForVisual(visualId, e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Hand tracking</span>
+            </label>
             <div className="flex gap-2">
               <button
                 className={`px-3 py-1 rounded text-sm transition-colors ${
@@ -244,6 +294,15 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
         <div className="absolute top-4 right-4 z-50">
           <div className="bg-gray-800/80 backdrop-blur-sm rounded-lg p-3 space-y-2">
             <div className="text-sm text-white font-medium">Prism Hand</div>
+            <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={handTrackingEnabled}
+                onChange={(e) => setHandTrackingEnabledForVisual(visualId, e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Hand tracking</span>
+            </label>
             <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
               <input
                 type="checkbox"
@@ -339,6 +398,15 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
             <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
               <input
                 type="checkbox"
+                checked={handTrackingEnabled}
+                onChange={(e) => setHandTrackingEnabledForVisual(visualId, e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Hand tracking</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+              <input
+                type="checkbox"
                 checked={leftHanded}
                 onChange={(e) => setLeftHanded(e.target.checked)}
                 className="w-4 h-4"
@@ -427,6 +495,15 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
         <div className="absolute top-4 right-4 z-50">
           <div className="bg-gray-900/80 backdrop-blur-sm rounded-lg p-3 space-y-2 max-h-[80vh] overflow-y-auto w-80">
             <div className="text-sm text-white font-medium">Constellation</div>
+            <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={handTrackingEnabled}
+                onChange={(e) => setHandTrackingEnabledForVisual(visualId, e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Hand tracking</span>
+            </label>
             <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
               <input
                 type="checkbox"
@@ -864,6 +941,15 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       ) : (
         <div className="absolute bottom-4 right-4 z-50">
           <div className="bg-gray-800/80 backdrop-blur-sm rounded-lg p-3">
+            <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={handTrackingEnabled}
+                onChange={(e) => setHandTrackingEnabledForVisual(visualId, e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Hand tracking</span>
+            </label>
             <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
               <input
                 type="checkbox"

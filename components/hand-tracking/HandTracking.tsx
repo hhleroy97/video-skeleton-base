@@ -2,6 +2,33 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { FinalVector } from './PinchHistoryTracker';
+import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
+
+// Pose connections (subset of MediaPipe Pose landmark topology, 33 points)
+// Enough to make the overlay immediately useful and match the Studio demo feel.
+const POSE_CONNECTIONS: Array<[number, number]> = [
+  // Face / head
+  [0, 1], [1, 2], [2, 3], [3, 7],
+  [0, 4], [4, 5], [5, 6], [6, 8],
+  [9, 10],
+  // Torso
+  [11, 12],
+  [11, 23],
+  [12, 24],
+  [23, 24],
+  // Left arm
+  [11, 13], [13, 15],
+  [15, 17], [15, 19], [15, 21],
+  [17, 19],
+  // Right arm
+  [12, 14], [14, 16],
+  [16, 18], [16, 20], [16, 22],
+  [18, 20],
+  // Left leg
+  [23, 25], [25, 27], [27, 29], [29, 31], [27, 31],
+  // Right leg
+  [24, 26], [26, 28], [28, 30], [30, 32], [28, 32],
+];
 
 // Hand connections based on MediaPipe hand landmarks (21 points)
 const HAND_CONNECTIONS: Array<[number, number]> = [
@@ -117,11 +144,21 @@ export interface HandTrackingProps {
   onRightHandDistance?: (distance: number | null) => void; // Distance between thumb and index on right hand
   onHands3D?: (hands: Hand3DData[]) => void; // Callback with 3D hand data for visualization
   leftHanded?: boolean; // If true, swap which hand controls what
+  enablePose?: boolean; // If true, draw pose landmarks overlay (MediaPipe Pose Landmarker)
   className?: string; // Optional className for custom styling
   hideRestartButton?: boolean; // If true, hide the restart camera button
 }
 
-export function HandTracking({ onPinchVector, compositeVector, onRightHandDistance, onHands3D, leftHanded = false, className = '', hideRestartButton = false }: HandTrackingProps = {}) {
+export function HandTracking({
+  onPinchVector,
+  compositeVector,
+  onRightHandDistance,
+  onHands3D,
+  leftHanded = false,
+  enablePose = false,
+  className = '',
+  hideRestartButton = false,
+}: HandTrackingProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compositeVectorRef = useRef<FinalVector | null>(null);
@@ -129,6 +166,11 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
   const onRightHandDistanceRef = useRef<HandTrackingProps['onRightHandDistance']>(onRightHandDistance);
   const onHands3DRef = useRef<HandTrackingProps['onHands3D']>(onHands3D);
   const leftHandedRef = useRef<boolean>(leftHanded);
+  const enablePoseRef = useRef<boolean>(enablePose);
+  const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const poseInitRef = useRef<Promise<void> | null>(null);
+  const poseLandmarksRef = useRef<Array<{ x: number; y: number }> | null>(null);
+  const [poseError, setPoseError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
@@ -152,6 +194,10 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
   useEffect(() => {
     leftHandedRef.current = leftHanded;
   }, [leftHanded]);
+  useEffect(() => {
+    enablePoseRef.current = enablePose;
+    if (!enablePose) setPoseError(null);
+  }, [enablePose]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -162,6 +208,7 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
     let CameraClass: any = null;
     let stream: MediaStream | null = null;
     let initInProgress = false;
+    let lastPoseTsMs = 0;
 
     // Simple drawing utilities (since DrawingUtils from CDN isn't working)
     const drawConnectors = (
@@ -391,6 +438,18 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
           
           // Draw the video image (will be flipped by the transformation)
           canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+          // Draw pose overlay (if enabled and available)
+          if (enablePoseRef.current && poseLandmarksRef.current) {
+            drawConnectors(canvasCtx, poseLandmarksRef.current as any, POSE_CONNECTIONS, {
+              color: '#22c55e',
+              lineWidth: 4,
+            });
+            drawLandmarks(canvasCtx, poseLandmarksRef.current as any, {
+              color: '#22c55e',
+              radius: 2.5,
+            });
+          }
 
           let pinchVector: PinchVector | null = null;
           let pinchPosition: { x: number; y: number } | null = null; // Actual pinch position for drawing
@@ -706,6 +765,84 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
             if (frameCount % FRAME_SKIP !== 0) {
               return;
             }
+
+            // Lazy-init Pose Landmarker when enabled
+            if (enablePoseRef.current && !poseLandmarkerRef.current && !poseInitRef.current) {
+              poseInitRef.current = (async () => {
+                // MediaPipe Solutions (hands.js) and MediaPipe Tasks both use Emscripten/WASM.
+                // On some setups, Solutions' global `Module` can break Tasks WASM init.
+                // Temporarily clear it during Tasks initialization to avoid collisions.
+                const g = globalThis as any;
+                const savedModule = g.Module;
+                const savedArguments = g.arguments_;
+                try {
+                  try {
+                    delete g.Module;
+                    delete g.arguments_;
+                  } catch {
+                    g.Module = undefined;
+                    g.arguments_ = undefined;
+                  }
+
+                  const vision = await FilesetResolver.forVisionTasks(
+                    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
+                  );
+                  poseLandmarkerRef.current = await PoseLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                      modelAssetPath:
+                        'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+                    },
+                    runningMode: 'VIDEO',
+                    numPoses: 1,
+                    minPoseDetectionConfidence: 0.5,
+                    minPosePresenceConfidence: 0.5,
+                    minTrackingConfidence: 0.5,
+                  });
+                  setPoseError(null);
+                } finally {
+                  if (savedModule !== undefined) g.Module = savedModule;
+                  else {
+                    try {
+                      delete g.Module;
+                    } catch {
+                      g.Module = undefined;
+                    }
+                  }
+                  if (savedArguments !== undefined) g.arguments_ = savedArguments;
+                  else {
+                    try {
+                      delete g.arguments_;
+                    } catch {
+                      g.arguments_ = undefined;
+                    }
+                  }
+                }
+              })().catch((e) => {
+                console.warn('PoseLandmarker init failed:', e);
+                poseLandmarkerRef.current = null;
+                poseInitRef.current = null; // allow retry
+                setPoseError('Pose Landmarker failed to initialize (see console).');
+              });
+            }
+
+            // Run Pose Landmarker (if enabled)
+            if (enablePoseRef.current && poseLandmarkerRef.current) {
+              const nowMs = performance.now();
+              // Avoid double-processing if onFrame is called multiple times with identical timestamps
+              if (nowMs !== lastPoseTsMs) {
+                lastPoseTsMs = nowMs;
+                const poseResult = poseLandmarkerRef.current.detectForVideo(video, nowMs);
+                const pose = poseResult?.landmarks?.[0];
+                if (pose && pose.length) {
+                  poseLandmarksRef.current = pose.map((p) => ({ x: p.x, y: p.y }));
+                } else {
+                  poseLandmarksRef.current = null;
+                }
+              }
+            } else if (!enablePoseRef.current) {
+              poseLandmarksRef.current = null;
+            }
+
             await handsInstance.send({ image: video });
           },
           width: 640,
@@ -741,6 +878,13 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
 
     return () => {
       cleanup();
+      try {
+        poseLandmarkerRef.current?.close?.();
+      } catch {
+        // ignore
+      }
+      poseLandmarkerRef.current = null;
+      poseInitRef.current = null;
     };
   }, []);
 
@@ -775,6 +919,11 @@ export function HandTracking({ onPinchVector, compositeVector, onRightHandDistan
           height={480}
           className={`${className.includes('object-cover') ? 'w-full h-full object-cover' : 'w-full max-w-full h-auto'} border border-gray-300 rounded-lg ${className}`}
         />
+        {poseError && !isLoading && !error && (
+          <div className="absolute bottom-2 left-2 right-2 rounded bg-black/70 text-white text-xs px-2 py-1">
+            {poseError}
+          </div>
+        )}
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-75 rounded-lg">
             <div className="text-center">

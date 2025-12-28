@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
+import { TrackingSettingsProvider } from "@/components/providers/TrackingSettingsProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -39,7 +40,7 @@ export default function RootLayout({
           src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"
           strategy="beforeInteractive"
         />
-        {children}
+        <TrackingSettingsProvider>{children}</TrackingSettingsProvider>
       </body>
     </html>
   );

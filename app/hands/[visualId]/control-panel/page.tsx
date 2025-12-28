@@ -13,6 +13,7 @@ import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfigSaveLoad } from '@/components/hand-tracking/ConfigSaveLoad';
+import { useTrackingSettings } from '@/components/providers/TrackingSettingsProvider';
 import { getVisualConfig } from '../../visuals-config';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -46,6 +47,19 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
   const [prismControls, setPrismControls] = useState<PrismHandControls>(DEFAULT_PRISM_HAND_CONTROLS);
   const [oneLineControls, setOneLineControls] = useState<OneLineHandControls>(DEFAULT_ONE_LINE_CONTROLS);
   const [constellationControls, setConstellationControls] = useState<ConstellationControls>(DEFAULT_CONSTELLATION_CONTROLS);
+  const { isHandTrackingEnabledForVisual, setHandTrackingEnabledForVisual, bodyTrackingEnabled, setBodyTrackingEnabled } =
+    useTrackingSettings();
+
+  const handTrackingEnabled = visualId ? isHandTrackingEnabledForVisual(visualId) : true;
+
+  useEffect(() => {
+    if (handTrackingEnabled) return;
+    setHands3D([]);
+    setPinchVector(null);
+    setRightHandDistance(null);
+    setFinalVector(null);
+    setCurrentVector(null);
+  }, [handTrackingEnabled]);
   
   // Handle both sync and async params
   useEffect(() => {
@@ -145,19 +159,51 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
             </div>
             <div className="flex gap-2">
               <Link
-                href="/hands"
+                href="/"
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
               >
                 ← Back
               </Link>
               <Link
-                href={`/hands/${visualId}`}
+                href={`/${visualId}/final_view`}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
-                Fullscreen View
+                Final View
+              </Link>
+              <Link
+                href={`/${visualId}`}
+                className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors"
+              >
+                Dev Fullscreen
               </Link>
             </div>
           </div>
+        </div>
+
+        <div className="mb-6 flex flex-wrap gap-4 items-center">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={handTrackingEnabled}
+              onChange={(e) => setHandTrackingEnabledForVisual(visualId, e.target.checked)}
+              className="w-4 h-4"
+            />
+            <span>Hand tracking enabled</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={bodyTrackingEnabled}
+              onChange={(e) => setBodyTrackingEnabled(e.target.checked)}
+              className="w-4 h-4"
+            />
+            <span>Body tracking (global)</span>
+          </label>
+          {!handTrackingEnabled && (
+            <div className="text-sm text-muted-foreground">
+              Hand tracking is disabled for this visual — it will not react to the camera feed.
+            </div>
+          )}
         </div>
 
         {visualConfig.component === 'BasicHandTracking' ? (
@@ -184,6 +230,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
               <div className="relative">
                 <HandTracking 
                   leftHanded={leftHanded}
+                  enablePose={bodyTrackingEnabled}
                 />
               </div>
             </CardContent>
@@ -212,10 +259,13 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                 </CardHeader>
                 <CardContent>
                   <div className="relative">
-                    <HandTracking
-                      onHands3D={handleHands3D}
-                      leftHanded={leftHanded}
-                    />
+                    {handTrackingEnabled ? (
+                      <HandTracking onHands3D={handleHands3D} leftHanded={leftHanded} enablePose={bodyTrackingEnabled} />
+                    ) : (
+                      <div className="w-full aspect-video flex items-center justify-center bg-black/10 rounded text-sm text-muted-foreground">
+                        Hand tracking disabled
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -976,6 +1026,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                       compositeVector={currentVector || finalVector}
                       onRightHandDistance={setRightHandDistance}
                       leftHanded={leftHanded}
+                      enablePose={bodyTrackingEnabled}
                     />
                   </div>
                 </CardContent>

@@ -6,10 +6,12 @@ This directory contains the hand tracking visualization system with support for 
 
 ```
 /hands
-  ├── page.tsx                    # Main navigation page (lists all visuals)
+  ├── page.tsx                    # Redirects to `/` (hands is now the base route)
   ├── visuals-config.ts          # Configuration for all visuals
   ├── [visualId]/
-  │   ├── page.tsx               # Dynamic route for visual fullscreen view
+  │   ├── page.tsx               # Dynamic route for DEV fullscreen view (debug/testing)
+  │   ├── final_view/
+  │   │   └── page.tsx           # Dynamic route for USER-facing final view (custom layout area)
   │   └── control-panel/
   │       └── page.tsx           # Dynamic route for visual control panel
   └── viz1/                      # Legacy route (still works)
@@ -37,7 +39,8 @@ Edit `visuals-config.ts` and add your new visual:
 
 ### Step 2: Add Component Case
 
-In both `/hands/[visualId]/page.tsx` and `/hands/[visualId]/control-panel/page.tsx`, add a case in the `renderVisual()` function:
+In `/hands/[visualId]/page.tsx`, `/hands/[visualId]/final_view/page.tsx`, and `/hands/[visualId]/control-panel/page.tsx`,
+add a case in the `renderVisual()` function:
 
 ```typescript
 case 'YourComponentType':
@@ -50,9 +53,18 @@ Create your visualization component in `/components/hand-tracking/` following th
 
 ## Routes
 
-- `/hands` - Main navigation page showing all available visuals
-- `/hands/[visualId]` - Fullscreen view of a specific visual
-- `/hands/[visualId]/control-panel` - Control panel for a specific visual
+- `/` - Main navigation page showing all available visuals (**new base route**)
+- `/[visualId]/final_view` - **Final View** (user-facing fullscreen + custom layout area)
+- `/[visualId]` - Dev fullscreen view of a specific visual
+- `/[visualId]/control-panel` - Control panel for a specific visual
+
+## Tracking toggles
+
+- **Body tracking (global)**: a global toggle on the home page (`/`). This is intended to control any body-tracking
+  features/visuals (present or future) from one place.
+- **Hand tracking (per visual)**: each visual card on the home page includes a **Hand tracking enabled** toggle.
+  When disabled, the visual still renders but **no camera hand-tracking is processed** for that visual, so it will not react.
+  You can also toggle this inside the visual pages (Dev Fullscreen / Control Panel / Final View).
 
 ## Saved Configurations
 
