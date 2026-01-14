@@ -9,6 +9,7 @@ import { PrismHandVisual, type PrismHandControls, DEFAULT_PRISM_HAND_CONTROLS } 
 import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS } from '@/components/hand-tracking/OneLineHandVisual';
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
 import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
+import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS, countExtendedFingers, type FingerDebugInfo } from '@/components/hand-tracking/MidasTouchVisual';
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,6 +18,9 @@ import { useTrackingSettings } from '@/components/providers/TrackingSettingsProv
 import { getVisualConfig } from '../../visuals-config';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+
+// Material names for debug display (must match MATERIALS in MidasTouchVisual)
+const MATERIALS_NAMES = ['Obsidian', 'Ruby Red', 'Emerald Green', 'Sapphire Blue', 'Gold'];
 
 export default function ControlPanelPage({ params }: { params: Promise<{ visualId: string }> }) {
   const [pinchVector, setPinchVector] = useState<PinchVector | null>(null);
@@ -47,8 +51,41 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
   const [prismControls, setPrismControls] = useState<PrismHandControls>(DEFAULT_PRISM_HAND_CONTROLS);
   const [oneLineControls, setOneLineControls] = useState<OneLineHandControls>(DEFAULT_ONE_LINE_CONTROLS);
   const [constellationControls, setConstellationControls] = useState<ConstellationControls>(DEFAULT_CONSTELLATION_CONTROLS);
+  const [midasTouchControls, setMidasTouchControls] = useState<MidasTouchControls>(DEFAULT_MIDAS_TOUCH_CONTROLS);
+  const [fingerDebugInfo, setFingerDebugInfo] = useState<{ left: FingerDebugInfo | null; right: FingerDebugInfo | null }>({ left: null, right: null });
   const { isHandTrackingEnabledForVisual, setHandTrackingEnabledForVisual, bodyTrackingEnabled, setBodyTrackingEnabled } =
     useTrackingSettings();
+
+  // Track finger counting for debug display
+  // Note: MediaPipe handedness is often "Unknown", so we also use first/second hand as fallback
+  useEffect(() => {
+    if (hands3D.length === 0) {
+      setFingerDebugInfo({ left: null, right: null });
+      return;
+    }
+    
+    // Try to find by explicit handedness first
+    let leftHand = hands3D.find(h => h.handedness === 'Left');
+    let rightHand = hands3D.find(h => h.handedness === 'Right');
+    
+    // Fallback: if no explicit handedness, use first hand as "left" (material control)
+    // and second hand as "right" (camera control)
+    if (!leftHand && !rightHand) {
+      leftHand = hands3D[0] || null;
+      rightHand = hands3D[1] || null;
+    } else if (!leftHand && hands3D.length > 1) {
+      // Have right but not left, use other hand as left
+      leftHand = hands3D.find(h => h !== rightHand) || null;
+    } else if (!rightHand && hands3D.length > 1) {
+      // Have left but not right, use other hand as right
+      rightHand = hands3D.find(h => h !== leftHand) || null;
+    }
+    
+    const leftDebug = leftHand ? countExtendedFingers(leftHand.landmarks, leftHand.handedness).debug : null;
+    const rightDebug = rightHand ? countExtendedFingers(rightHand.landmarks, rightHand.handedness).debug : null;
+    
+    setFingerDebugInfo({ left: leftDebug, right: rightDebug });
+  }, [hands3D]);
 
   const handTrackingEnabled = visualId ? isHandTrackingEnabledForVisual(visualId) : true;
 
@@ -137,6 +174,12 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
         return (
           <div className="w-full h-96">
             <ConstellationVisual hands={hands3D} controls={constellationControls} />
+          </div>
+        );
+      case 'MidasTouchVisual':
+        return (
+          <div className="w-full h-96">
+            <MidasTouchVisual hands={hands3D} controls={midasTouchControls} />
           </div>
         );
       // Add more component cases here as needed
@@ -235,7 +278,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
               </div>
             </CardContent>
           </Card>
-        ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' ? (
+        ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' ? (
           // Layout for 3D hand visualization
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
@@ -272,7 +315,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
               <Card>
                 <CardHeader>
                   <CardTitle>
-                    {visualConfig.component === 'Hand3DVisual' ? '3D Hand Visualization' : visualConfig.component === 'PrismHandVisual' ? 'Prism Hand Visualization' : visualConfig.component === 'OneLineHandVisual' ? 'One Unbroken Line' : 'Constellation'}
+                    {visualConfig.component === 'Hand3DVisual' ? '3D Hand Visualization' : visualConfig.component === 'PrismHandVisual' ? 'Prism Hand Visualization' : visualConfig.component === 'OneLineHandVisual' ? 'One Unbroken Line' : visualConfig.component === 'MidasTouchVisual' ? 'Midas Touch' : 'Constellation'}
                   </CardTitle>
                   <CardDescription>
                     {visualConfig.component === 'Hand3DVisual'
@@ -281,7 +324,9 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                         ? 'Impressionistic prism shards tracing the hand bones'
                         : visualConfig.component === 'OneLineHandVisual'
                           ? 'Minimalist continuous stroke with fractal-like noise'
-                          : 'Your hand as a cosmos: 21 stars with nebulae'}
+                          : visualConfig.component === 'MidasTouchVisual'
+                            ? 'Transform materials with your hands: clay to gold, stone to crystal'
+                            : 'Your hand as a cosmos: 21 stars with nebulae'}
                   </CardDescription>
                   {visualConfig.component === 'Hand3DVisual' && (
                     <>
@@ -941,6 +986,237 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                 currentControls={constellationControls}
                 onLoadConfig={(controls) => setConstellationControls(controls as typeof constellationControls)}
               />
+            )}
+
+            {visualConfig.component === 'MidasTouchVisual' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Midas Touch Controls</CardTitle>
+                  <CardDescription>Adjust material transformation settings</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Transform Speed</span>
+                        <span className="font-mono">{midasTouchControls.transformSpeed.toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="5"
+                        step="0.1"
+                        value={midasTouchControls.transformSpeed}
+                        onChange={(e) => setMidasTouchControls((c) => ({ ...c, transformSpeed: parseFloat(e.target.value) }))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Base Roughness</span>
+                        <span className="font-mono">{midasTouchControls.baseRoughness.toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1"
+                        step="0.05"
+                        value={midasTouchControls.baseRoughness}
+                        onChange={(e) => setMidasTouchControls((c) => ({ ...c, baseRoughness: parseFloat(e.target.value) }))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Glow Intensity</span>
+                        <span className="font-mono">{midasTouchControls.glowIntensity.toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={midasTouchControls.glowIntensity}
+                        onChange={(e) => setMidasTouchControls((c) => ({ ...c, glowIntensity: parseFloat(e.target.value) }))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Particle Count</span>
+                        <span className="font-mono">{midasTouchControls.particleCount}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="50"
+                        max="500"
+                        step="10"
+                        value={midasTouchControls.particleCount}
+                        onChange={(e) => setMidasTouchControls((c) => ({ ...c, particleCount: parseInt(e.target.value, 10) }))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Particle Size</span>
+                        <span className="font-mono">{midasTouchControls.particleSize.toFixed(3)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.005"
+                        max="0.05"
+                        step="0.001"
+                        value={midasTouchControls.particleSize}
+                        onChange={(e) => setMidasTouchControls((c) => ({ ...c, particleSize: parseFloat(e.target.value) }))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Auto Rotate Speed</span>
+                        <span className="font-mono">{midasTouchControls.autoRotateSpeed.toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="0.5"
+                        step="0.01"
+                        value={midasTouchControls.autoRotateSpeed}
+                        onChange={(e) => setMidasTouchControls((c) => ({ ...c, autoRotateSpeed: parseFloat(e.target.value) }))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span>Geometry</span>
+                        <span className="font-mono">{midasTouchControls.geometryType}</span>
+                      </div>
+                      <select
+                        value={midasTouchControls.geometryType}
+                        onChange={(e) => setMidasTouchControls((c) => ({ ...c, geometryType: e.target.value as any }))}
+                        className="w-full px-2 py-1 rounded bg-white border border-gray-200 text-sm"
+                      >
+                        <option value="torusKnot">Torus Knot</option>
+                        <option value="icosahedron">Icosahedron</option>
+                        <option value="sphere">Sphere</option>
+                        <option value="dodecahedron">Dodecahedron</option>
+                      </select>
+                    </div>
+                    <button
+                      className="px-3 py-2 rounded bg-gray-900 text-white text-sm hover:bg-gray-800"
+                      onClick={() => setMidasTouchControls(DEFAULT_MIDAS_TOUCH_CONTROLS)}
+                    >
+                      Reset
+                    </button>
+                    <div className="text-xs text-muted-foreground">
+                      Left hand finger count (1-4) selects material color. Right hand controls camera orbit. See debug panel below for finger detection status.
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {visualConfig.component === 'MidasTouchVisual' && (
+              <ConfigSaveLoad
+                visualId={visualId}
+                currentControls={midasTouchControls}
+                onLoadConfig={(controls) => setMidasTouchControls(controls as typeof midasTouchControls)}
+              />
+            )}
+
+            {/* Finger Counting Debug for MidasTouch */}
+            {visualConfig.component === 'MidasTouchVisual' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Finger Counting Debug</CardTitle>
+                  <CardDescription>Real-time finger detection using MediaPipe landmarks (tip.y &lt; pip.y = extended)</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {/* Raw hands3D status */}
+                    <div className="p-3 bg-yellow-100 rounded border border-yellow-300 text-sm">
+                      <div className="font-semibold">hands3D array status:</div>
+                      <div className="font-mono text-xs mt-1">
+                        Length: {hands3D.length} hand(s) detected
+                        {hands3D.length > 0 && (
+                          <div className="mt-1">
+                            {hands3D.map((h, i) => (
+                              <div key={i}>Hand {i}: {h.handedness} ({h.landmarks.length} landmarks)</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Left Hand (or first hand if handedness unknown) */}
+                    <div className="border-l-4 border-blue-500 pl-4">
+                      <h3 className="text-sm font-semibold mb-2">
+                        Material Control Hand {fingerDebugInfo.left ? `[${fingerDebugInfo.left.handedness}] (${fingerDebugInfo.left.count} fingers)` : ''}
+                      </h3>
+                      {fingerDebugInfo.left ? (
+                        <div className="space-y-1 font-mono text-xs">
+                          <div className={fingerDebugInfo.left.index.extended ? 'text-green-600' : 'text-red-600'}>
+                            Index: tip.y={fingerDebugInfo.left.index.tip.toFixed(4)} pip.y={fingerDebugInfo.left.index.pip.toFixed(4)} → {fingerDebugInfo.left.index.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className={fingerDebugInfo.left.middle.extended ? 'text-green-600' : 'text-red-600'}>
+                            Middle: tip.y={fingerDebugInfo.left.middle.tip.toFixed(4)} pip.y={fingerDebugInfo.left.middle.pip.toFixed(4)} → {fingerDebugInfo.left.middle.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className={fingerDebugInfo.left.ring.extended ? 'text-green-600' : 'text-red-600'}>
+                            Ring: tip.y={fingerDebugInfo.left.ring.tip.toFixed(4)} pip.y={fingerDebugInfo.left.ring.pip.toFixed(4)} → {fingerDebugInfo.left.ring.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className={fingerDebugInfo.left.pinky.extended ? 'text-green-600' : 'text-red-600'}>
+                            Pinky: tip.y={fingerDebugInfo.left.pinky.tip.toFixed(4)} pip.y={fingerDebugInfo.left.pinky.pip.toFixed(4)} → {fingerDebugInfo.left.pinky.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className="mt-2 font-semibold text-sm">
+                            Total Extended: {fingerDebugInfo.left.count} → Material #{fingerDebugInfo.left.count} ({MATERIALS_NAMES[fingerDebugInfo.left.count] ?? 'Unknown'})
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-gray-500 text-sm">No hand detected for material control (show 1 hand)</div>
+                      )}
+                    </div>
+
+                    {/* Right Hand (or second hand if handedness unknown) */}
+                    <div className="border-l-4 border-green-500 pl-4">
+                      <h3 className="text-sm font-semibold mb-2">
+                        Camera Control Hand {fingerDebugInfo.right ? `[${fingerDebugInfo.right.handedness}] (${fingerDebugInfo.right.count} fingers)` : ''}
+                      </h3>
+                      {fingerDebugInfo.right ? (
+                        <div className="space-y-1 font-mono text-xs">
+                          <div className={fingerDebugInfo.right.index.extended ? 'text-green-600' : 'text-red-600'}>
+                            Index: tip.y={fingerDebugInfo.right.index.tip.toFixed(4)} pip.y={fingerDebugInfo.right.index.pip.toFixed(4)} → {fingerDebugInfo.right.index.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className={fingerDebugInfo.right.middle.extended ? 'text-green-600' : 'text-red-600'}>
+                            Middle: tip.y={fingerDebugInfo.right.middle.tip.toFixed(4)} pip.y={fingerDebugInfo.right.middle.pip.toFixed(4)} → {fingerDebugInfo.right.middle.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className={fingerDebugInfo.right.ring.extended ? 'text-green-600' : 'text-red-600'}>
+                            Ring: tip.y={fingerDebugInfo.right.ring.tip.toFixed(4)} pip.y={fingerDebugInfo.right.ring.pip.toFixed(4)} → {fingerDebugInfo.right.ring.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className={fingerDebugInfo.right.pinky.extended ? 'text-green-600' : 'text-red-600'}>
+                            Pinky: tip.y={fingerDebugInfo.right.pinky.tip.toFixed(4)} pip.y={fingerDebugInfo.right.pinky.pip.toFixed(4)} → {fingerDebugInfo.right.pinky.extended ? '✓ Extended' : '✗ Closed'}
+                          </div>
+                          <div className="mt-2 font-semibold text-sm">
+                            Total Extended: {fingerDebugInfo.right.count}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-gray-500 text-sm">No second hand detected (show 2 hands for camera control)</div>
+                      )}
+                    </div>
+
+                    {/* Legend */}
+                    <div className="mt-4 p-3 bg-gray-100 rounded text-xs">
+                      <div className="font-semibold mb-1">How it works:</div>
+                      <div>• MediaPipe y=0 is at TOP of image</div>
+                      <div>• If fingertip.y &lt; pip.y (tip is ABOVE pip), finger is extended</div>
+                      <div>• First hand: 0-4 fingers selects materials (Obsidian/Red/Green/Blue/Gold)</div>
+                      <div>• Second hand: Controls camera orbit (if 2 hands visible)</div>
+                      <div>• Particles only appear during material transitions</div>
+                      <div className="mt-1 text-gray-500">Note: MediaPipe often reports &quot;Unknown&quot; for handedness, so we use hand order as fallback</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             )}
             
             {/* Bounding Box Data */}

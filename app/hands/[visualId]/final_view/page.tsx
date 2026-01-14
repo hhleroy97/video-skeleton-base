@@ -12,6 +12,7 @@ import { Hand3DVisual } from '@/components/hand-tracking/Hand3DVisual';
 import { PrismHandVisual, type PrismHandControls, DEFAULT_PRISM_HAND_CONTROLS } from '@/components/hand-tracking/PrismHandVisual';
 import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS } from '@/components/hand-tracking/OneLineHandVisual';
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
+import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS } from '@/components/hand-tracking/MidasTouchVisual';
 import { useTrackingSettings } from '@/components/providers/TrackingSettingsProvider';
 
 import { getVisualConfig } from '../../visuals-config';
@@ -58,6 +59,7 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
   const [prismControls, setPrismControls] = useState<PrismHandControls>(DEFAULT_PRISM_HAND_CONTROLS);
   const [oneLineControls, setOneLineControls] = useState<OneLineHandControls>(DEFAULT_ONE_LINE_CONTROLS);
   const [constellationControls, setConstellationControls] = useState<ConstellationControls>(DEFAULT_CONSTELLATION_CONTROLS);
+  const [midasTouchControls, setMidasTouchControls] = useState<MidasTouchControls>(DEFAULT_MIDAS_TOUCH_CONTROLS);
 
   const handTrackingEnabled = visualId ? isHandTrackingEnabledForVisual(visualId) : true;
 
@@ -144,6 +146,8 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
         return <OneLineHandVisual hands={hands3D} className="w-full h-full" controls={oneLineControls} />;
       case 'ConstellationVisual':
         return <ConstellationVisual hands={hands3D} className="w-full h-full" controls={constellationControls} />;
+      case 'MidasTouchVisual':
+        return <MidasTouchVisual hands={hands3D} className="w-full h-full" controls={midasTouchControls} />;
       default:
         return <div className="p-6">Visual component not implemented yet</div>;
     }
@@ -223,7 +227,8 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
                         visualConfig.component === 'Hand3DVisual' ||
                         visualConfig.component === 'PrismHandVisual' ||
                         visualConfig.component === 'OneLineHandVisual' ||
-                        visualConfig.component === 'ConstellationVisual'
+                        visualConfig.component === 'ConstellationVisual' ||
+                        visualConfig.component === 'MidasTouchVisual'
                           ? handleHands3D
                           : undefined
                       }

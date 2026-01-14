@@ -14,7 +14,8 @@ export interface VisualConfig {
     | 'Hand3DVisual'
     | 'PrismHandVisual'
     | 'OneLineHandVisual'
-    | 'ConstellationVisual';
+    | 'ConstellationVisual'
+    | 'MidasTouchVisual';
   fullscreen?: boolean;
   enabled: boolean;
 }
@@ -65,6 +66,14 @@ export const visualsConfig: VisualConfig[] = [
     name: 'Constellation (Pocket Universe)',
     description: 'Hand as a cosmos: 21 stars with nebulae, constellation lines, and cosmic depth',
     component: 'ConstellationVisual',
+    fullscreen: true,
+    enabled: true,
+  },
+  {
+    id: 'viz7',
+    name: 'Midas Touch',
+    description: 'Transform materials with your hands: clay to gold, stone to crystal. Hand proximity triggers alchemical transformation.',
+    component: 'MidasTouchVisual',
     fullscreen: true,
     enabled: true,
   },

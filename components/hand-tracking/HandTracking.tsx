@@ -463,9 +463,11 @@ export function HandTracking({
               if (results.multiHandedness && results.multiHandedness[index]) {
                 const handData = results.multiHandedness[index];
                 if (Array.isArray(handData) && handData[0]) {
-                  handedness = handData[0].categoryName || 'Unknown';
+                  handedness = handData[0].categoryName || handData[0].label || 'Unknown';
                 } else if (handData.categoryName) {
                   handedness = handData.categoryName;
+                } else if (handData.label) {
+                  handedness = handData.label;
                 }
               }
               return {

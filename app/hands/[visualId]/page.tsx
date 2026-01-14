@@ -9,6 +9,7 @@ import { PrismHandVisual, type PrismHandControls, DEFAULT_PRISM_HAND_CONTROLS } 
 import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS } from '@/components/hand-tracking/OneLineHandVisual';
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
 import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
+import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS } from '@/components/hand-tracking/MidasTouchVisual';
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { ConfigSaveLoadCompact } from '@/components/hand-tracking/ConfigSaveLoadCompact';
@@ -48,6 +49,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
   const [prismControls, setPrismControls] = useState<PrismHandControls>(DEFAULT_PRISM_HAND_CONTROLS);
   const [oneLineControls, setOneLineControls] = useState<OneLineHandControls>(DEFAULT_ONE_LINE_CONTROLS);
   const [constellationControls, setConstellationControls] = useState<ConstellationControls>(DEFAULT_CONSTELLATION_CONTROLS);
+  const [midasTouchControls, setMidasTouchControls] = useState<MidasTouchControls>(DEFAULT_MIDAS_TOUCH_CONTROLS);
 
   const handTrackingEnabled = visualId ? isHandTrackingEnabledForVisual(visualId) : true;
 
@@ -127,6 +129,9 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       case 'ConstellationVisual':
         // Constellation visualization - rendered separately
         return null;
+      case 'MidasTouchVisual':
+        // Midas Touch visualization - rendered separately
+        return null;
       // Add more component cases here as needed
       default:
         return <div>Visual component not implemented yet</div>;
@@ -182,6 +187,11 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
           <ConstellationVisual hands={hands3D} className="w-full h-full" controls={constellationControls} />
         </div>
       )}
+      {visualConfig.component === 'MidasTouchVisual' && (
+        <div className="absolute inset-0 z-30">
+          <MidasTouchVisual hands={hands3D} className="w-full h-full" controls={midasTouchControls} />
+        </div>
+      )}
 
       {/* Camera feed - different layout based on visual type */}
       {visualConfig.component === 'BasicHandTracking' ? (
@@ -200,7 +210,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
             </div>
           )}
         </div>
-      ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' ? (
+      ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' ? (
         // Small camera feed overlay for 3D hand visualization
         <div className="absolute bottom-4 right-4 z-50 w-48 h-36 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg">
           {handTrackingEnabled ? (
@@ -934,6 +944,125 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
                 visualId={visualId}
                 currentControls={constellationControls}
                 onLoadConfig={(controls) => setConstellationControls(controls as typeof constellationControls)}
+              />
+            </div>
+          </div>
+        </div>
+      ) : visualConfig.component === 'MidasTouchVisual' ? (
+        <div className="absolute top-4 right-4 z-50">
+          <div className="bg-gray-800/80 backdrop-blur-sm rounded-lg p-3 space-y-2 w-72">
+            <div className="text-sm text-white font-medium">Midas Touch</div>
+            <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={handTrackingEnabled}
+                onChange={(e) => setHandTrackingEnabledForVisual(visualId, e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Hand tracking</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+              <input
+                type="checkbox"
+                checked={leftHanded}
+                onChange={(e) => setLeftHanded(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Left-handed</span>
+            </label>
+            <div className="space-y-2">
+              <div className="text-xs text-gray-300">Controls</div>
+              <div className="space-y-2 text-xs text-gray-200">
+                <div>
+                  <div className="flex justify-between">
+                    <span>Transform Speed</span>
+                    <span className="font-mono">{midasTouchControls.transformSpeed.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="5"
+                    step="0.1"
+                    value={midasTouchControls.transformSpeed}
+                    onChange={(e) => setMidasTouchControls((c) => ({ ...c, transformSpeed: parseFloat(e.target.value) }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between">
+                    <span>Glow Intensity</span>
+                    <span className="font-mono">{midasTouchControls.glowIntensity.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={midasTouchControls.glowIntensity}
+                    onChange={(e) => setMidasTouchControls((c) => ({ ...c, glowIntensity: parseFloat(e.target.value) }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between">
+                    <span>Particle Count</span>
+                    <span className="font-mono">{midasTouchControls.particleCount}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="50"
+                    max="500"
+                    step="10"
+                    value={midasTouchControls.particleCount}
+                    onChange={(e) => setMidasTouchControls((c) => ({ ...c, particleCount: parseInt(e.target.value, 10) }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between">
+                    <span>Auto Rotate</span>
+                    <span className="font-mono">{midasTouchControls.autoRotateSpeed.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="0.5"
+                    step="0.01"
+                    value={midasTouchControls.autoRotateSpeed}
+                    onChange={(e) => setMidasTouchControls((c) => ({ ...c, autoRotateSpeed: parseFloat(e.target.value) }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>Geometry</span>
+                    <span className="font-mono">{midasTouchControls.geometryType}</span>
+                  </div>
+                  <select
+                    value={midasTouchControls.geometryType}
+                    onChange={(e) => setMidasTouchControls((c) => ({ ...c, geometryType: e.target.value as any }))}
+                    className="w-full px-2 py-1 rounded bg-gray-700 text-white text-xs border border-gray-600"
+                  >
+                    <option value="torusKnot">Torus Knot</option>
+                    <option value="icosahedron">Icosahedron</option>
+                    <option value="sphere">Sphere</option>
+                    <option value="dodecahedron">Dodecahedron</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                className="w-full px-2 py-1 rounded bg-gray-700 text-white text-xs hover:bg-gray-600"
+                onClick={() => setMidasTouchControls(DEFAULT_MIDAS_TOUCH_CONTROLS)}
+              >
+                Reset
+              </button>
+              <div className="text-[11px] text-gray-400">
+                Move hands closer to transform. Left = warm (gold), Right = cool (crystal). Pinch to polish.
+              </div>
+              <ConfigSaveLoadCompact
+                visualId={visualId}
+                currentControls={midasTouchControls}
+                onLoadConfig={(controls) => setMidasTouchControls(controls as typeof midasTouchControls)}
               />
             </div>
           </div>
