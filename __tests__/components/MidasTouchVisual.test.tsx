@@ -1,4 +1,10 @@
-import { DEFAULT_MIDAS_TOUCH_CONTROLS, type MidasTouchControls } from '@/components/hand-tracking/MidasTouchVisual';
+import {
+  DEFAULT_MIDAS_TOUCH_CONTROLS,
+  detectMaterialStepAction,
+  isMovementHandActive,
+  MIDAS_TOUCH_MATERIAL_PRESETS,
+  type MidasTouchControls,
+} from '@/components/hand-tracking/MidasTouchVisual';
 
 describe('MidasTouchVisual', () => {
   describe('DEFAULT_MIDAS_TOUCH_CONTROLS', () => {
@@ -42,6 +48,101 @@ describe('MidasTouchVisual', () => {
     it('geometryType is a valid option', () => {
       const validTypes = ['torusKnot', 'icosahedron', 'sphere', 'dodecahedron'];
       expect(validTypes).toContain(DEFAULT_MIDAS_TOUCH_CONTROLS.geometryType);
+    });
+  });
+
+  describe('MIDAS_TOUCH_MATERIAL_PRESETS (palette A)', () => {
+    it('has 4 presets (1-4 fingers)', () => {
+      expect(MIDAS_TOUCH_MATERIAL_PRESETS).toHaveLength(4);
+    });
+
+    it('includes distinct looks: ceramic, brushed metal, frosted glass, neon', () => {
+      const names = MIDAS_TOUCH_MATERIAL_PRESETS.map((m) => m.name);
+      expect(names).toEqual([
+        'Ceramic Porcelain',
+        'Brushed Metal',
+        'Frosted Glass',
+        'Neon Emissive',
+      ]);
+    });
+
+    it('frosted glass uses transmission and neon uses emissive', () => {
+      const frosted = MIDAS_TOUCH_MATERIAL_PRESETS[2];
+      expect(frosted.transmission).toBeGreaterThan(0.5);
+      expect(frosted.roughness).toBeGreaterThan(0.4);
+
+      const neon = MIDAS_TOUCH_MATERIAL_PRESETS[3];
+      expect(neon.emissiveIntensity).toBeGreaterThan(0);
+      expect(neon.emissive).toBeDefined();
+    });
+  });
+
+  describe('detectMaterialStepAction', () => {
+    const makeLandmarks = (overrides: Partial<Record<number, { x: number; y: number; z: number }>> = {}) =>
+      new Array(21).fill(0).map((_, i) => overrides[i] ?? { x: 0, y: 0, z: 0 });
+
+    it('returns null when landmarks are invalid', () => {
+      expect(detectMaterialStepAction([] as any).action).toBe(null);
+    });
+
+    it('detects prev on thumb+index pinch', () => {
+      const lm = makeLandmarks({
+        4: { x: 0, y: 0, z: 0 },      // thumb tip
+        8: { x: 0.01, y: 0, z: 0 },   // index tip close
+        12: { x: 0.2, y: 0, z: 0 },   // middle tip far
+      });
+      expect(detectMaterialStepAction(lm, 0.05).action).toBe('prev');
+    });
+
+    it('detects next on thumb+middle pinch', () => {
+      const lm = makeLandmarks({
+        4: { x: 0, y: 0, z: 0 },
+        8: { x: 0.2, y: 0, z: 0 },
+        12: { x: 0.01, y: 0, z: 0 },
+      });
+      expect(detectMaterialStepAction(lm, 0.05).action).toBe('next');
+    });
+
+    it('can use a larger middle pinch threshold', () => {
+      const lm = makeLandmarks({
+        4: { x: 0, y: 0, z: 0 },
+        8: { x: 0.2, y: 0, z: 0 },    // far
+        12: { x: 0.07, y: 0, z: 0 },  // 0.07 away
+      });
+      expect(
+        detectMaterialStepAction(lm, { indexThreshold: 0.05, middleThreshold: 0.075 }).action
+      ).toBe('next');
+    });
+
+    it('chooses the closer pinch if both are under threshold', () => {
+      const lm = makeLandmarks({
+        4: { x: 0, y: 0, z: 0 },
+        8: { x: 0.02, y: 0, z: 0 },  // 0.02
+        12: { x: 0.01, y: 0, z: 0 }, // 0.01 -> closer, so next
+      });
+      expect(detectMaterialStepAction(lm, 0.05).action).toBe('next');
+    });
+  });
+
+  describe('isMovementHandActive', () => {
+    it('returns false for null', () => {
+      expect(isMovementHandActive(null)).toBe(false);
+    });
+
+    it('returns false for partial landmark sets', () => {
+      const hand = {
+        handedness: 'Right',
+        landmarks: new Array(20).fill(0).map(() => ({ x: 0, y: 0, z: 0 })),
+      } as any;
+      expect(isMovementHandActive(hand)).toBe(false);
+    });
+
+    it('returns true for a full landmark set (21+)', () => {
+      const hand = {
+        handedness: 'Right',
+        landmarks: new Array(21).fill(0).map(() => ({ x: 0, y: 0, z: 0 })),
+      } as any;
+      expect(isMovementHandActive(hand)).toBe(true);
     });
   });
 

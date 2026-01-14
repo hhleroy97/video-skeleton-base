@@ -177,11 +177,10 @@ Transform materials with your hands: a gesture-based material selector with came
 - **Interaction**:
   - **Right hand** controls camera orbit around the object (move hand to rotate view)
   - **No right hand** = auto-rotating camera view
-  - **Left hand finger count** selects material:
-    - 1 finger = Ruby Red
-    - 2 fingers = Emerald Green
-    - 3 fingers = Sapphire Blue
-    - 4 fingers = Gold
+  - **Left hand pinch gestures** step materials:
+    - **Thumb + Index** pinch = **Previous** material
+    - **Thumb + Middle** pinch = **Next** material
+    - (Hold the pinch briefly; it edge-triggers to avoid rapid cycling)
 - **Controls**:
   - **Transform Speed**: how quickly the material color transitions
   - **Particle Count**: number of spark particles around the object
@@ -190,7 +189,7 @@ Transform materials with your hands: a gesture-based material selector with came
   - **Geometry**: shape of the central object (Torus Knot, Icosahedron, Sphere, Dodecahedron)
 - **UI Overlay**: Shows current finger count, selected material, and camera control status
 - **Business applications**: Material preview for e-commerce, product configurators, interactive presentations
-- **Visual notes**: Smooth color transitions, particle bursts on material change, metallic shiny materials
+- **Visual notes**: Smooth transitions, particle bursts on material change, and high-contrast material variety (ceramic → satin metal → frosted glass → neon glow)
 
 ## Features
 

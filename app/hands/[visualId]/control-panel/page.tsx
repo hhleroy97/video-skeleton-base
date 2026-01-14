@@ -19,9 +19,6 @@ import { getVisualConfig } from '../../visuals-config';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 
-// Material names for debug display (must match MATERIALS in MidasTouchVisual)
-const MATERIALS_NAMES = ['Obsidian', 'Ruby Red', 'Emerald Green', 'Sapphire Blue', 'Gold'];
-
 export default function ControlPanelPage({ params }: { params: Promise<{ visualId: string }> }) {
   const [pinchVector, setPinchVector] = useState<PinchVector | null>(null);
   const [finalVector, setFinalVector] = useState<FinalVector | null>(null);
@@ -1168,7 +1165,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                             Pinky: tip.y={fingerDebugInfo.left.pinky.tip.toFixed(4)} pip.y={fingerDebugInfo.left.pinky.pip.toFixed(4)} → {fingerDebugInfo.left.pinky.extended ? '✓ Extended' : '✗ Closed'}
                           </div>
                           <div className="mt-2 font-semibold text-sm">
-                            Total Extended: {fingerDebugInfo.left.count} → Material #{fingerDebugInfo.left.count} ({MATERIALS_NAMES[fingerDebugInfo.left.count] ?? 'Unknown'})
+                            Total Extended: {fingerDebugInfo.left.count} (debug only)
                           </div>
                         </div>
                       ) : (
@@ -1209,7 +1206,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                       <div className="font-semibold mb-1">How it works:</div>
                       <div>• MediaPipe y=0 is at TOP of image</div>
                       <div>• If fingertip.y &lt; pip.y (tip is ABOVE pip), finger is extended</div>
-                      <div>• First hand: 0-4 fingers selects materials (Obsidian/Red/Green/Blue/Gold)</div>
+                      <div>• Midas Touch selection uses pinch gestures (thumb+index prev, thumb+middle next)</div>
                       <div>• Second hand: Controls camera orbit (if 2 hands visible)</div>
                       <div>• Particles only appear during material transitions</div>
                       <div className="mt-1 text-gray-500">Note: MediaPipe often reports &quot;Unknown&quot; for handedness, so we use hand order as fallback</div>

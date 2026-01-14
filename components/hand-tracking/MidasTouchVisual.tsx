@@ -37,16 +37,87 @@ interface MidasTouchVisualProps {
 }
 
 // ============================================================================
-// Material Definitions - 5 Materials (0-4 fingers)
+// Material Definitions - 4 Materials (1-4 fingers)
+// 0 fingers = "no change" (keep current material)
 // ============================================================================
 
-const MATERIALS = [
-  { color: 0x2a2a2a, name: 'Obsidian', metalness: 0.3, roughness: 0.8 },    // 0 fingers - dark matte
-  { color: 0xff3333, name: 'Ruby Red', metalness: 0.9, roughness: 0.1 },     // 1 finger
-  { color: 0x33ff33, name: 'Emerald Green', metalness: 0.9, roughness: 0.1 }, // 2 fingers
-  { color: 0x3333ff, name: 'Sapphire Blue', metalness: 0.9, roughness: 0.1 }, // 3 fingers
-  { color: 0xffd700, name: 'Gold', metalness: 1.0, roughness: 0.05 },        // 4 fingers
-];
+export interface MidasMaterialPreset {
+  name: string;
+  /** Base albedo color for the object + particles */
+  color: number;
+  /** PBR core */
+  metalness: number;
+  roughness: number;
+  /** Environment reflection contribution */
+  envMapIntensity?: number;
+  /** Physical extras (only used by MeshPhysicalMaterial, but safe to keep unified) */
+  transmission?: number; // 0..1 (glassiness)
+  ior?: number;          // ~1.0..2.5
+  thickness?: number;    // 0.. (scene units; small values are fine)
+  opacity?: number;      // 0..1 (used when transparent)
+  /** Emissive (for neon/self-lit looks) */
+  emissive?: number;
+  emissiveIntensity?: number;
+  /** Volumetric tint for transmissive materials (MeshPhysicalMaterial) */
+  attenuationColor?: number;
+  attenuationDistance?: number;
+}
+
+/**
+ * Material presets for Midas Touch (viz7).
+ *
+ * 4-slot palette:
+ * - 1: Ceramic/Porcelain (non-metal, clean highlights)
+ * - 2: Brushed metal (satin reflections)
+ * - 3: Frosted glass (transmission + roughness)
+ * - 4: Neon emissive (self-lit glow)
+ *
+ * Note: 0 fingers intentionally does not map to a preset; it means "hold current".
+ */
+export const MIDAS_TOUCH_MATERIAL_PRESETS: readonly MidasMaterialPreset[] = [
+  // 1 finger
+  {
+    name: 'Ceramic Porcelain',
+    color: 0xf2f2f2,
+    metalness: 0.0,
+    roughness: 0.28,
+    envMapIntensity: 0.8,
+  },
+  // 2 fingers
+  {
+    name: 'Brushed Metal',
+    color: 0xb3bcc8,
+    metalness: 1.0,
+    roughness: 0.42,
+    envMapIntensity: 1.25,
+  },
+  // 3 fingers (updated)
+  {
+    name: 'Frosted Glass',
+    color: 0xbfe8ff,
+    metalness: 0.0,
+    roughness: 0.78,
+    envMapIntensity: 1.15,
+    transmission: 1.0,
+    ior: 1.52,
+    thickness: 1.1,
+    opacity: 1.0,
+    attenuationColor: 0x7fc7ff,
+    attenuationDistance: 1.25,
+  },
+  // 4 fingers
+  {
+    name: 'Neon Emissive',
+    color: 0xff2fc7,
+    metalness: 0.1,
+    roughness: 0.35,
+    envMapIntensity: 0.6,
+    emissive: 0xff2fc7,
+    emissiveIntensity: 2.25,
+  },
+] as const;
+
+const MATERIALS = MIDAS_TOUCH_MATERIAL_PRESETS;
 
 // ============================================================================
 // Finger Counting Utility (MediaPipe best practice)
@@ -138,6 +209,105 @@ export function countExtendedFingers(
   return { count, debug };
 }
 
+/**
+ * Returns true when the "movement" hand (camera-control hand) is actively tracked.
+ * In this visual, that means: we have a hand object and a full landmark set (21+).
+ */
+export function isMovementHandActive(hand: Hand3DData | null): boolean {
+  return !!hand && Array.isArray(hand.landmarks) && hand.landmarks.length >= 21;
+}
+
+export type MaterialStepAction = 'prev' | 'next';
+
+export interface MaterialStepDebug {
+  thumbIndexDistance: number | null;
+  thumbMiddleDistance: number | null;
+  indexPinched: boolean;
+  middlePinched: boolean;
+  detected: MaterialStepAction | null;
+}
+
+function landmarkDistance(
+  landmarks: Array<{ x: number; y: number; z: number }>,
+  a: number,
+  b: number
+): number | null {
+  const p1 = landmarks[a];
+  const p2 = landmarks[b];
+  if (!p1 || !p2) return null;
+  const dx = p1.x - p2.x;
+  const dy = p1.y - p2.y;
+  const dz = (p1.z ?? 0) - (p2.z ?? 0);
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
+ * Detect discrete "step" gestures on a single hand:
+ * - thumb + index tip = previous material
+ * - thumb + middle tip = next material
+ *
+ * Landmarks are MediaPipe normalized coords; thresholds are also in that space.
+ */
+export function detectMaterialStepAction(
+  landmarks: Array<{ x: number; y: number; z: number }>,
+  pinchThreshold:
+    | number
+    | {
+        /** Thumb+index pinch distance threshold (normalized coords). */
+        indexThreshold?: number;
+        /** Thumb+middle pinch distance threshold (normalized coords). */
+        middleThreshold?: number;
+      } = 0.05
+): { action: MaterialStepAction | null; debug: MaterialStepDebug } {
+  if (!Array.isArray(landmarks) || landmarks.length < 21) {
+    return {
+      action: null,
+      debug: {
+        thumbIndexDistance: null,
+        thumbMiddleDistance: null,
+        indexPinched: false,
+        middlePinched: false,
+        detected: null,
+      },
+    };
+  }
+
+  const indexThreshold =
+    typeof pinchThreshold === 'number' ? pinchThreshold : pinchThreshold.indexThreshold ?? 0.05;
+  // Slightly more permissive by default; middle-tip pinch tends to read "farther" in practice.
+  const middleThreshold =
+    typeof pinchThreshold === 'number' ? pinchThreshold : pinchThreshold.middleThreshold ?? 0.065;
+
+  // MediaPipe indices: thumb tip 4, index tip 8, middle tip 12
+  const thumbIndexDistance = landmarkDistance(landmarks, 4, 8);
+  const thumbMiddleDistance = landmarkDistance(landmarks, 4, 12);
+
+  const isIndexPinch = thumbIndexDistance !== null && thumbIndexDistance < indexThreshold;
+  const isMiddlePinch = thumbMiddleDistance !== null && thumbMiddleDistance < middleThreshold;
+
+  let action: MaterialStepAction | null = null;
+  if (isIndexPinch && isMiddlePinch) {
+    // If both are "pinched", choose the closer one to avoid ambiguity.
+    action =
+      (thumbIndexDistance ?? Infinity) <= (thumbMiddleDistance ?? Infinity) ? 'prev' : 'next';
+  } else if (isIndexPinch) {
+    action = 'prev';
+  } else if (isMiddlePinch) {
+    action = 'next';
+  }
+
+  return {
+    action,
+    debug: {
+      thumbIndexDistance,
+      thumbMiddleDistance,
+      indexPinched: isIndexPinch,
+      middlePinched: isMiddlePinch,
+      detected: action,
+    },
+  };
+}
+
 // ============================================================================
 // Camera Controller Component
 // ============================================================================
@@ -159,7 +329,7 @@ function CameraController({
   useFrame((state, delta) => {
     const radius = 3;
     const baseHeight = 1;
-    const isHandControlled = rightHand !== null && rightHand.landmarks.length >= 21;
+    const isHandControlled = isMovementHandActive(rightHand);
     
     if (isHandControlled) {
       // Hand detected - control camera with hand position
@@ -350,21 +520,31 @@ function TransformingObject({
   materialIndex,
   geometryType,
   transformSpeed,
+  baseRoughness,
+  glowIntensity,
+  freezeRotation,
 }: {
   materialIndex: number;
   geometryType: string;
   transformSpeed: number;
+  baseRoughness: number;
+  glowIntensity: number;
+  freezeRotation: boolean;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const materialRef = useRef<THREE.MeshPhysicalMaterial>(null);
   const currentColorRef = useRef(new THREE.Color(MATERIALS[0].color));
+  const currentEmissiveRef = useRef(new THREE.Color(0x000000));
+  const DEFAULT_ATTENUATION_DISTANCE = 1000; // large finite value; avoids Infinity->NaN lerp issues
   
   useFrame((state, delta) => {
     if (!meshRef.current || !materialRef.current) return;
     
-    // Gentle idle rotation
-    meshRef.current.rotation.y += delta * 0.2;
-    meshRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
+    // Gentle idle rotation (disabled while the movement hand is controlling the camera)
+    if (!freezeRotation) {
+      meshRef.current.rotation.y += delta * 0.2;
+      meshRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
+    }
     
     // Smooth color transition
     const targetColor = new THREE.Color(MATERIALS[materialIndex]?.color ?? 0xffffff);
@@ -374,14 +554,78 @@ function TransformingObject({
     // Update material properties
     const mat = MATERIALS[materialIndex];
     if (mat) {
+      const targetRoughness = THREE.MathUtils.clamp(mat.roughness * baseRoughness, 0, 1);
+      const targetMetalness = THREE.MathUtils.clamp(mat.metalness, 0, 1);
+
       materialRef.current.metalness = THREE.MathUtils.lerp(
         materialRef.current.metalness,
-        mat.metalness,
+        targetMetalness,
         delta * transformSpeed
       );
       materialRef.current.roughness = THREE.MathUtils.lerp(
         materialRef.current.roughness,
-        mat.roughness,
+        targetRoughness,
+        delta * transformSpeed
+      );
+
+      const targetEnvIntensity = mat.envMapIntensity ?? 1.0;
+      materialRef.current.envMapIntensity = THREE.MathUtils.lerp(
+        materialRef.current.envMapIntensity ?? targetEnvIntensity,
+        targetEnvIntensity,
+        delta * transformSpeed
+      );
+
+      // Physical transmission (glass) + opacity/transparent toggles
+      const targetTransmission = THREE.MathUtils.clamp(mat.transmission ?? 0, 0, 1);
+      const targetOpacity = THREE.MathUtils.clamp(mat.opacity ?? 1, 0, 1);
+      const targetIor = THREE.MathUtils.clamp(mat.ior ?? 1.5, 1.0, 2.5);
+      const targetThickness = Math.max(0, mat.thickness ?? 0);
+      const targetAttenuationColor = new THREE.Color(mat.attenuationColor ?? 0xffffff);
+      const targetAttenuationDistance = Math.max(0, mat.attenuationDistance ?? DEFAULT_ATTENUATION_DISTANCE);
+
+      materialRef.current.transmission = THREE.MathUtils.lerp(
+        materialRef.current.transmission ?? 0,
+        targetTransmission,
+        delta * transformSpeed
+      );
+      materialRef.current.opacity = THREE.MathUtils.lerp(
+        materialRef.current.opacity ?? 1,
+        targetOpacity,
+        delta * transformSpeed
+      );
+      materialRef.current.ior = THREE.MathUtils.lerp(
+        materialRef.current.ior ?? 1.5,
+        targetIor,
+        delta * transformSpeed
+      );
+      materialRef.current.thickness = THREE.MathUtils.lerp(
+        materialRef.current.thickness ?? 0,
+        targetThickness,
+        delta * transformSpeed
+      );
+      materialRef.current.attenuationColor.lerp(targetAttenuationColor, delta * transformSpeed);
+      // IMPORTANT: never lerp with Infinity; it produces NaN and can "poison" the whole material.
+      const currentAttenuationDistance =
+        Number.isFinite(materialRef.current.attenuationDistance)
+          ? materialRef.current.attenuationDistance
+          : DEFAULT_ATTENUATION_DISTANCE;
+      materialRef.current.attenuationDistance = Number.isFinite(targetAttenuationDistance)
+        ? THREE.MathUtils.lerp(currentAttenuationDistance, targetAttenuationDistance, delta * transformSpeed)
+        : DEFAULT_ATTENUATION_DISTANCE;
+
+      const wantsTransparency = targetTransmission > 0.01 || targetOpacity < 0.99;
+      materialRef.current.transparent = wantsTransparency;
+      materialRef.current.depthWrite = !wantsTransparency;
+
+      // Emissive (neon): lerp color + intensity, scale by glowIntensity control
+      const targetEmissiveColor = new THREE.Color(mat.emissive ?? 0x000000);
+      currentEmissiveRef.current.lerp(targetEmissiveColor, delta * transformSpeed);
+      materialRef.current.emissive.copy(currentEmissiveRef.current);
+
+      const targetEmissiveIntensity = (mat.emissiveIntensity ?? 0) * THREE.MathUtils.clamp(glowIntensity, 0, 2);
+      materialRef.current.emissiveIntensity = THREE.MathUtils.lerp(
+        materialRef.current.emissiveIntensity ?? 0,
+        targetEmissiveIntensity,
         delta * transformSpeed
       );
     }
@@ -401,12 +645,20 @@ function TransformingObject({
       {geometryType === 'dodecahedron' && (
         <dodecahedronGeometry args={[0.6, 0]} />
       )}
-      <meshStandardMaterial
+      <meshPhysicalMaterial
         ref={materialRef}
         color={MATERIALS[0].color}
         metalness={MATERIALS[0].metalness}
         roughness={MATERIALS[0].roughness}
-        envMapIntensity={1.5}
+        envMapIntensity={MATERIALS[0].envMapIntensity ?? 1.0}
+        transmission={MATERIALS[0].transmission ?? 0}
+        ior={MATERIALS[0].ior ?? 1.5}
+        thickness={MATERIALS[0].thickness ?? 0}
+        opacity={MATERIALS[0].opacity ?? 1}
+        emissive={MATERIALS[0].emissive ?? 0x000000}
+        emissiveIntensity={MATERIALS[0].emissiveIntensity ?? 0}
+        attenuationColor={MATERIALS[0].attenuationColor ?? 0xffffff}
+        attenuationDistance={MATERIALS[0].attenuationDistance ?? DEFAULT_ATTENUATION_DISTANCE}
       />
     </mesh>
   );
@@ -418,17 +670,17 @@ function TransformingObject({
 
 function UIOverlay({ 
   materialIndex, 
-  fingerCount,
   rightHandDetected,
   leftHandDetected,
-  fingerDebug,
+  lastStepAction,
+  stepDebug,
   showDebug = false,
 }: { 
   materialIndex: number;
-  fingerCount: number;
   rightHandDetected: boolean;
   leftHandDetected: boolean;
-  fingerDebug: FingerDebugInfo | null;
+  lastStepAction: MaterialStepAction | null;
+  stepDebug: MaterialStepDebug | null;
   showDebug?: boolean;
 }) {
   return (
@@ -436,7 +688,7 @@ function UIOverlay({
       {/* Material indicator */}
       <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3 text-white">
         <div className="text-xs text-gray-400 mb-1">
-          Left Hand: {leftHandDetected ? `${fingerCount} finger${fingerCount !== 1 ? 's' : ''}` : 'Not detected'}
+          Left Hand: {leftHandDetected ? 'Detected' : 'Not detected'}
         </div>
         <div className="flex items-center gap-2">
           <div 
@@ -445,11 +697,20 @@ function UIOverlay({
           />
           <span className="text-sm font-medium">{MATERIALS[materialIndex]?.name ?? 'Unknown'}</span>
         </div>
+        <div className="mt-2 text-xs text-gray-300">
+          <div>Index+Thumb: Prev</div>
+          <div>Middle+Thumb: Next</div>
+          {lastStepAction && (
+            <div className="mt-1 text-white">
+              Last: {lastStepAction === 'prev' ? 'Prev' : 'Next'}
+            </div>
+          )}
+        </div>
       </div>
       
       {/* Material palette */}
       <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3">
-        <div className="text-xs text-gray-400 mb-2">Materials (show 0-4 fingers)</div>
+        <div className="text-xs text-gray-400 mb-2">Materials (show 1-4 fingers)</div>
         <div className="flex gap-2">
           {MATERIALS.map((mat, idx) => (
             <div
@@ -458,7 +719,7 @@ function UIOverlay({
                 idx === materialIndex ? 'border-white scale-110' : 'border-gray-600'
               }`}
               style={{ backgroundColor: `#${mat.color.toString(16).padStart(6, '0')}` }}
-              title={`${idx} finger${idx !== 1 ? 's' : ''}: ${mat.name}`}
+              title={`${idx + 1} finger${idx + 1 !== 1 ? 's' : ''}: ${mat.name}`}
             />
           ))}
         </div>
@@ -473,23 +734,19 @@ function UIOverlay({
       </div>
       
       {/* Debug info */}
-      {showDebug && fingerDebug && (
+      {showDebug && stepDebug && (
         <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3 text-white font-mono text-xs">
-          <div className="text-gray-400 mb-2">Finger Debug ({fingerDebug.handedness})</div>
+          <div className="text-gray-400 mb-2">Gesture Debug</div>
           <div className="space-y-1">
-            <div className={fingerDebug.index.extended ? 'text-green-400' : 'text-red-400'}>
-              Index: tip={fingerDebug.index.tip.toFixed(3)} pip={fingerDebug.index.pip.toFixed(3)} {fingerDebug.index.extended ? '✓' : '✗'}
+            <div>
+              thumb-index: {stepDebug.thumbIndexDistance === null ? 'n/a' : stepDebug.thumbIndexDistance.toFixed(4)}
             </div>
-            <div className={fingerDebug.middle.extended ? 'text-green-400' : 'text-red-400'}>
-              Middle: tip={fingerDebug.middle.tip.toFixed(3)} pip={fingerDebug.middle.pip.toFixed(3)} {fingerDebug.middle.extended ? '✓' : '✗'}
+            <div>
+              thumb-middle: {stepDebug.thumbMiddleDistance === null ? 'n/a' : stepDebug.thumbMiddleDistance.toFixed(4)}
             </div>
-            <div className={fingerDebug.ring.extended ? 'text-green-400' : 'text-red-400'}>
-              Ring: tip={fingerDebug.ring.tip.toFixed(3)} pip={fingerDebug.ring.pip.toFixed(3)} {fingerDebug.ring.extended ? '✓' : '✗'}
+            <div className="mt-2 text-white">
+              Detected: {stepDebug.detected ?? 'none'}
             </div>
-            <div className={fingerDebug.pinky.extended ? 'text-green-400' : 'text-red-400'}>
-              Pinky: tip={fingerDebug.pinky.tip.toFixed(3)} pip={fingerDebug.pinky.pip.toFixed(3)} {fingerDebug.pinky.extended ? '✓' : '✗'}
-            </div>
-            <div className="mt-2 text-white">Total: {fingerDebug.count} fingers extended</div>
           </div>
         </div>
       )}
@@ -503,10 +760,10 @@ function UIOverlay({
 
 export interface MidasTouchState {
   materialIndex: number;
-  fingerCount: number;
   rightHandDetected: boolean;
   leftHandDetected: boolean;
-  fingerDebug: FingerDebugInfo | null;
+  lastStepAction: MaterialStepAction | null;
+  stepDebug: MaterialStepDebug | null;
   isTransitioning: boolean;
 }
 
@@ -526,6 +783,10 @@ function MidasTouchScene({
   const materialIndexRef = useRef(materialIndex);
   const transitionTimeRef = useRef(0);
   const TRANSITION_DURATION = 0.8; // seconds to show particles after material change
+  const lastStepActionRef = useRef<MaterialStepAction | null>(null);
+  const stepCooldownRef = useRef(0);
+  const prevIndexPinchedRef = useRef(false);
+  const prevMiddlePinchedRef = useRef(false);
   
   // Find left and right hands
   // Note: MediaPipe handedness is often "Unknown", so we use fallback logic
@@ -544,24 +805,53 @@ function MidasTouchScene({
   }
   
   useFrame((state, delta) => {
-    // Count fingers on left hand (or first hand) to select material
-    let fingerCount = 0;
-    let fingerDebug: FingerDebugInfo | null = null;
-    
-    // Use leftHand (which has fallback logic applied above)
-    if (leftHand && leftHand.landmarks.length >= 21) {
-      const result = countExtendedFingers(leftHand.landmarks, leftHand.handedness);
-      fingerCount = result.count;
-      fingerDebug = result.debug;
+    // Gesture stepping on left hand (or first hand)
+    let stepDebug: MaterialStepDebug | null = null;
+
+    // Countdown cooldown (prevents rapid stepping while held)
+    if (stepCooldownRef.current > 0) {
+      stepCooldownRef.current = Math.max(0, stepCooldownRef.current - delta);
     }
-    
-    // Map finger count to material index (0-4 fingers = materials 0-4)
-    // 0 fingers = obsidian, 1 = red, 2 = green, 3 = blue, 4 = gold
+
     let newMaterialIndex = materialIndexRef.current;
     const previousIndex = materialIndexRef.current;
-    if (leftHand && fingerCount >= 0 && fingerCount <= 4) {
-      newMaterialIndex = fingerCount;
-      materialIndexRef.current = newMaterialIndex;
+
+    if (leftHand && leftHand.landmarks.length >= 21) {
+      const { action, debug } = detectMaterialStepAction(leftHand.landmarks, {
+        indexThreshold: 0.05,
+        middleThreshold: 0.075,
+      });
+      stepDebug = debug;
+
+      // Rising-edge trigger per pinch type (more reliable than "release both").
+      const indexRising = debug.indexPinched && !prevIndexPinchedRef.current;
+      const middleRising = debug.middlePinched && !prevMiddlePinchedRef.current;
+
+      let stepAction: MaterialStepAction | null = null;
+      if (indexRising && middleRising) {
+        // If both trigger together, choose closer.
+        stepAction =
+          (debug.thumbIndexDistance ?? Infinity) <= (debug.thumbMiddleDistance ?? Infinity)
+            ? 'prev'
+            : 'next';
+      } else if (indexRising) {
+        stepAction = 'prev';
+      } else if (middleRising) {
+        stepAction = 'next';
+      }
+
+      if (stepAction && stepCooldownRef.current === 0) {
+        const step = stepAction === 'next' ? 1 : -1;
+        const len = MATERIALS.length;
+        newMaterialIndex = ((previousIndex + step) % len + len) % len;
+        materialIndexRef.current = newMaterialIndex;
+        lastStepActionRef.current = stepAction;
+        stepCooldownRef.current = 0.22;
+      }
+
+      // Update previous pinch states AFTER computing rising edges.
+      prevIndexPinchedRef.current = debug.indexPinched;
+      prevMiddlePinchedRef.current = debug.middlePinched;
     }
     
     // Track transition state - trigger particles when material changes
@@ -579,10 +869,10 @@ function MidasTouchScene({
     // Report state for UI (this triggers React state update)
     onStateChange({
       materialIndex: newMaterialIndex,
-      fingerCount,
       rightHandDetected: rightHand !== null,
       leftHandDetected: leftHand !== null,
-      fingerDebug,
+      lastStepAction: lastStepActionRef.current,
+      stepDebug,
       isTransitioning,
     });
   });
@@ -596,6 +886,8 @@ function MidasTouchScene({
       default: return 0.7;
     }
   }, [controls.geometryType]);
+
+  const movementHandActive = isMovementHandActive(rightHand);
 
   return (
     <>
@@ -618,6 +910,9 @@ function MidasTouchScene({
         materialIndex={materialIndex}
         geometryType={controls.geometryType}
         transformSpeed={controls.transformSpeed}
+        baseRoughness={controls.baseRoughness}
+        glowIntensity={controls.glowIntensity}
+        freezeRotation={movementHandActive}
       />
       
       {/* Spark particles - only visible during material transitions */}
@@ -650,10 +945,10 @@ export function MidasTouchVisual({ hands, className = '', controls }: MidasTouch
   
   const [uiState, setUiState] = useState<MidasTouchState>({
     materialIndex: 0,
-    fingerCount: 0,
     rightHandDetected: false,
     leftHandDetected: false,
-    fingerDebug: null,
+    lastStepAction: null,
+    stepDebug: null,
     isTransitioning: false,
   });
   
@@ -662,10 +957,10 @@ export function MidasTouchVisual({ hands, className = '', controls }: MidasTouch
       {/* UI Overlay */}
       <UIOverlay 
         materialIndex={uiState.materialIndex}
-        fingerCount={uiState.fingerCount}
         rightHandDetected={uiState.rightHandDetected}
         leftHandDetected={uiState.leftHandDetected}
-        fingerDebug={uiState.fingerDebug}
+        lastStepAction={uiState.lastStepAction}
+        stepDebug={uiState.stepDebug}
         showDebug={false}
       />
       

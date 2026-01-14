@@ -93,6 +93,33 @@ const calculatePinchVector = (
 };
 
 // Detect pinch gesture (thumb and index finger close together)
+export function detectThumbFingerPinch(
+  landmarks: any[],
+  fingerTipIndex: number,
+  threshold: number = 0.05
+): {
+  isPinching: boolean;
+  distance: number;
+  pinchStrength: number;
+} {
+  if (!landmarks || landmarks.length < 21) {
+    return { isPinching: false, distance: Infinity, pinchStrength: 0 };
+  }
+
+  const thumbTip = landmarks[THUMB_TIP];
+  const fingerTip = landmarks[fingerTipIndex];
+
+  if (!thumbTip || !fingerTip) {
+    return { isPinching: false, distance: Infinity, pinchStrength: 0 };
+  }
+
+  const distance = calculateDistance(thumbTip, fingerTip);
+  const isPinching = distance < threshold;
+  const pinchStrength = Math.max(0, Math.min(1, 1 - distance / threshold));
+
+  return { isPinching, distance, pinchStrength };
+}
+
 const detectPinch = (
   landmarks: any[],
   threshold: number = 0.05
@@ -102,26 +129,19 @@ const detectPinch = (
   pinchStrength: number;
   vector?: { x: number; y: number; dx: number; dy: number };
 } => {
-  if (!landmarks || landmarks.length < 21) {
-    return { isPinching: false, distance: Infinity, pinchStrength: 0 };
+  const { isPinching, distance, pinchStrength } = detectThumbFingerPinch(
+    landmarks,
+    INDEX_FINGER_TIP,
+    threshold
+  );
+
+  if (!isPinching) {
+    return { isPinching, distance, pinchStrength };
   }
 
   const thumbTip = landmarks[THUMB_TIP];
   const indexTip = landmarks[INDEX_FINGER_TIP];
-
-  if (!thumbTip || !indexTip) {
-    return { isPinching: false, distance: Infinity, pinchStrength: 0 };
-  }
-
-  const distance = calculateDistance(thumbTip, indexTip);
-  const isPinching = distance < threshold;
-  
-  // Pinch strength: 0 (far apart) to 1 (touching)
-  // Normalize based on threshold (closer = stronger)
-  const pinchStrength = Math.max(0, Math.min(1, 1 - (distance / threshold)));
-
-  // Calculate vector when pinching
-  const vector = isPinching ? calculatePinchVector(thumbTip, indexTip) : undefined;
+  const vector = thumbTip && indexTip ? calculatePinchVector(thumbTip, indexTip) : undefined;
 
   return { isPinching, distance, pinchStrength, vector };
 };
@@ -537,16 +557,48 @@ export function HandTracking({
             
             // Draw both hands on canvas (but only control hand controls 3D)
             for (const hand of hands) {
-              const pinch = detectPinch(hand.landmarks, 0.05);
+              const pinchIndex = detectThumbFingerPinch(hand.landmarks, INDEX_FINGER_TIP, 0.05);
+              const pinchMiddle = detectThumbFingerPinch(hand.landmarks, MIDDLE_FINGER_TIP, 0.065);
+              const pinchState: 'none' | 'index' | 'middle' | 'both' =
+                pinchIndex.isPinching && pinchMiddle.isPinching
+                  ? 'both'
+                  : pinchIndex.isPinching
+                    ? 'index'
+                    : pinchMiddle.isPinching
+                      ? 'middle'
+                      : 'none';
               
               // Change color based on pinch state and whether this is the control hand
               const isControlHand = hand === handToUse;
-              const connectorColor = pinch.isPinching 
-                ? (isControlHand ? '#FFFF00' : '#FF00FF') // Yellow for control hand, magenta for other when pinching
-                : (isControlHand ? '#00FF00' : '#FF8800'); // Green for control hand, orange for other when not pinching
-              const landmarkColor = pinch.isPinching 
-                ? (isControlHand ? '#FF00FF' : '#00FFFF') // Magenta for control hand, cyan for other when pinching
-                : (isControlHand ? '#FF0000' : '#FF6600'); // Red for control hand, orange-red for other when not pinching
+              const connectorColor =
+                pinchState === 'index'
+                  ? isControlHand
+                    ? '#FFFF00' // Yellow for control hand on index pinch
+                    : '#FF00FF' // Magenta for other hand on index pinch
+                  : pinchState === 'middle'
+                    ? isControlHand
+                      ? '#00E5FF' // Cyan for control hand on middle pinch
+                      : '#7C3AED' // Violet for other hand on middle pinch
+                    : pinchState === 'both'
+                      ? '#FFFFFF' // Both pinches: white
+                      : isControlHand
+                        ? '#00FF00' // Green for control hand (idle)
+                        : '#FF8800'; // Orange for other hand (idle)
+
+              const landmarkColor =
+                pinchState === 'index'
+                  ? isControlHand
+                    ? '#FF00FF' // Magenta landmarks for control hand on index pinch
+                    : '#00FFFF' // Cyan landmarks for other hand on index pinch
+                  : pinchState === 'middle'
+                    ? isControlHand
+                      ? '#3B82F6' // Blue landmarks for control hand on middle pinch
+                      : '#A855F7' // Purple landmarks for other hand on middle pinch
+                    : pinchState === 'both'
+                      ? '#FFFFFF'
+                      : isControlHand
+                        ? '#FF0000'
+                        : '#FF6600';
               
               // Draw landmarks (will be flipped by the canvas transformation)
               drawConnectors(
