@@ -42,14 +42,14 @@ describe('HandsPage', () => {
     }
   });
 
-  it('shows a Hand tracking badge for each visual card', () => {
+  it('shows a tag badge for each visual card', () => {
     render(
       <TrackingSettingsProvider>
         <HandsHome />
       </TrackingSettingsProvider>
     );
 
-    const badges = screen.getAllByText('Hand tracking');
+    const badges = screen.getAllByLabelText(/visual tag/i);
     expect(badges.length).toBe(getAllEnabledVisuals().length);
   });
 

@@ -92,6 +92,16 @@ Configurations are stored in your browser's localStorage, so they persist across
 - `PinchControlledVisual` - 2D visual element (to be implemented)
 - `FinalVectorVisual` - Vector-based visualization (to be implemented)
 - `Hand3DVisual` - 3D hand landmark scene (skeleton or GLB model overlay)
+- `VideoPoseUploadVisual` - Upload a video and run MediaPipe body pose overlay
+
+## Storyboard Script Packs
+
+For presentation-first visuals, we keep reusable storyboard scripts that can be implemented as full visuals later.
+
+- **PCA deck (script-only)**:
+  - Overview: `app/hands/PCA_STORYBOARD.md`
+  - Canonical typed script data: `lib/storyboards/pcaStoryboard.ts`
+  - Validation tests: `__tests__/lib/pcaStoryboard.test.ts`
 
 ## Hand3DVisual GLB Overlay (viz3)
 
@@ -190,6 +200,48 @@ Transform materials with your hands: a gesture-based material selector with came
 - **UI Overlay**: Shows current finger count, selected material, and camera control status
 - **Business applications**: Material preview for e-commerce, product configurators, interactive presentations
 - **Visual notes**: Smooth transitions, particle bursts on material change, and high-contrast material variety (ceramic → satin metal → frosted glass → neon glow)
+
+## PCA Story Theater (viz8)
+
+A hand-driven 3D storytelling visual for PCA, designed for presentation flow and geometric intuition.
+
+- **Route**: `/hands/viz8`
+- **Control panel**: `/hands/viz8/control-panel`
+- **Interaction**:
+  - **On-screen arrows** (mouse): previous/next storyboard state
+  - **Keyboard arrows**: left = previous, right = next
+  - Hand-driven navigation/scrubbing is currently disabled
+- **Camera behavior**:
+  - Camera starts at a fixed initial pose for each page load
+  - Mouse drag rotates/orbits around the scene
+- **Transition behavior**:
+  - Point clouds animate along interpolated paths between states (no instant popping)
+- **Visual flow**:
+  - Raw cloud → centering → principal directions → projection → reconstruction → explained variance → caveats
+- **Data source**:
+  - Script/state definitions: `lib/storyboards/pcaStoryboard.ts`
+  - Runtime interpolation helpers: `lib/storyboards/pcaStoryRuntime.ts`
+
+## Video Pose Upload (viz9)
+
+Upload any prerecorded video and apply MediaPipe Pose body tracking directly on top of it.
+
+- **Route**: `/hands/viz9`
+- **Control panel**: `/hands/viz9/control-panel`
+- **Interaction**:
+  - Upload video file (`video/*`)
+  - Press **Play / Pause** to run analysis
+  - Choose **trim start / trim end** to focus on a section
+  - Enable **Loop within trim window** to repeatedly play the selected segment
+  - Pose skeleton and landmarks render on top of the uploaded clip
+  - Step events (foot down→up reversal) are marked as yellow points on-video and on a timeline strip
+  - Markers shift using border-based camera-motion estimation (camera/global motion, not body-following)
+  - Final view includes a camera-motion vector overlay (`dx`, `dy`)
+  - **Step sensitivity slider** tunes detection as a percentage of heel-to-ankle span (scale-aware in 3D/depth changes)
+  - Includes a foot-motion isolator sub-window with left/right 2D layouts of ankle, heel, and toe points
+- **Notes**:
+  - Uses MediaPipe Pose with a 33-point landmark overlay
+  - Designed for demos, analysis clips, and presentation-ready body tracking replays
 
 ## Features
 

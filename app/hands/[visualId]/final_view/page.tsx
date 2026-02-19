@@ -13,6 +13,8 @@ import { PrismHandVisual, type PrismHandControls, DEFAULT_PRISM_HAND_CONTROLS } 
 import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS } from '@/components/hand-tracking/OneLineHandVisual';
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
 import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS } from '@/components/hand-tracking/MidasTouchVisual';
+import { PcaStoryVisual } from '@/components/hand-tracking/PcaStoryVisual';
+import { VideoPoseUploadVisual } from '@/components/hand-tracking/VideoPoseUploadVisual';
 import { useTrackingSettings } from '@/components/providers/TrackingSettingsProvider';
 
 import { getVisualConfig } from '../../visuals-config';
@@ -148,6 +150,10 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
         return <ConstellationVisual hands={hands3D} className="w-full h-full" controls={constellationControls} />;
       case 'MidasTouchVisual':
         return <MidasTouchVisual hands={hands3D} className="w-full h-full" controls={midasTouchControls} />;
+      case 'PcaStoryVisual':
+        return <PcaStoryVisual hands={hands3D} className="w-full h-full" />;
+      case 'VideoPoseUploadVisual':
+        return <VideoPoseUploadVisual className="w-full h-full" />;
       default:
         return <div className="p-6">Visual component not implemented yet</div>;
     }
@@ -192,7 +198,7 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
             </div>
 
             {/* Tracking preview lives here in final_view so the main canvas stays clean */}
-            {visualConfig.component !== 'BasicHandTracking' && (
+            {visualConfig.component !== 'BasicHandTracking' && visualConfig.component !== 'VideoPoseUploadVisual' && (
               <div className="rounded-lg border border-white/10 overflow-hidden">
                 <div className="px-3 py-2 bg-black/40 border-b border-white/10 flex items-center justify-between">
                   <div className="text-sm font-medium">Tracking</div>
@@ -228,7 +234,8 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
                         visualConfig.component === 'PrismHandVisual' ||
                         visualConfig.component === 'OneLineHandVisual' ||
                         visualConfig.component === 'ConstellationVisual' ||
-                        visualConfig.component === 'MidasTouchVisual'
+                        visualConfig.component === 'MidasTouchVisual' ||
+                        visualConfig.component === 'PcaStoryVisual'
                           ? handleHands3D
                           : undefined
                       }

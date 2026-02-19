@@ -6,6 +6,7 @@ export interface VisualConfig {
   id: string;
   name: string;
   description: string;
+  tag?: string;
   component:
     | 'PinchControlled3D'
     | 'PinchControlledVisual'
@@ -15,7 +16,9 @@ export interface VisualConfig {
     | 'PrismHandVisual'
     | 'OneLineHandVisual'
     | 'ConstellationVisual'
-    | 'MidasTouchVisual';
+    | 'MidasTouchVisual'
+    | 'PcaStoryVisual'
+    | 'VideoPoseUploadVisual';
   fullscreen?: boolean;
   enabled: boolean;
 }
@@ -74,6 +77,24 @@ export const visualsConfig: VisualConfig[] = [
     name: 'Midas Touch',
     description: 'Transform materials with your hands: clay to gold, stone to crystal. Hand proximity triggers alchemical transformation.',
     component: 'MidasTouchVisual',
+    fullscreen: true,
+    enabled: true,
+  },
+  {
+    id: 'viz8',
+    name: 'PCA Story Theater',
+    description: 'Hand-driven 3D PCA explainer with scene states, interpolation scrubbing, and presentation overlays.',
+    tag: 'Data visualization',
+    component: 'PcaStoryVisual',
+    fullscreen: true,
+    enabled: true,
+  },
+  {
+    id: 'viz9',
+    name: 'Video Pose Upload',
+    description: 'Upload any video and apply MediaPipe body tracking with a real-time pose overlay.',
+    tag: 'Data visualization',
+    component: 'VideoPoseUploadVisual',
     fullscreen: true,
     enabled: true,
   },

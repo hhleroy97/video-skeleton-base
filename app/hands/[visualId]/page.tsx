@@ -10,6 +10,8 @@ import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS 
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
 import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
 import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS } from '@/components/hand-tracking/MidasTouchVisual';
+import { PcaStoryVisual } from '@/components/hand-tracking/PcaStoryVisual';
+import { VideoPoseUploadVisual } from '@/components/hand-tracking/VideoPoseUploadVisual';
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { ConfigSaveLoadCompact } from '@/components/hand-tracking/ConfigSaveLoadCompact';
@@ -132,6 +134,12 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       case 'MidasTouchVisual':
         // Midas Touch visualization - rendered separately
         return null;
+      case 'PcaStoryVisual':
+        // PCA Story visualization - rendered separately
+        return null;
+      case 'VideoPoseUploadVisual':
+        // Video pose upload visualization - rendered separately
+        return null;
       // Add more component cases here as needed
       default:
         return <div>Visual component not implemented yet</div>;
@@ -192,6 +200,16 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
           <MidasTouchVisual hands={hands3D} className="w-full h-full" controls={midasTouchControls} />
         </div>
       )}
+      {visualConfig.component === 'PcaStoryVisual' && (
+        <div className="absolute inset-0 z-30">
+          <PcaStoryVisual hands={hands3D} className="w-full h-full" />
+        </div>
+      )}
+      {visualConfig.component === 'VideoPoseUploadVisual' && (
+        <div className="absolute inset-0 z-30">
+          <VideoPoseUploadVisual className="w-full h-full" />
+        </div>
+      )}
 
       {/* Camera feed - different layout based on visual type */}
       {visualConfig.component === 'BasicHandTracking' ? (
@@ -210,7 +228,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
             </div>
           )}
         </div>
-      ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' ? (
+      ) : visualConfig.component === 'VideoPoseUploadVisual' ? null : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' || visualConfig.component === 'PcaStoryVisual' ? (
         // Small camera feed overlay for 3D hand visualization
         <div className="absolute bottom-4 right-4 z-50 w-48 h-36 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg">
           {handTrackingEnabled ? (
@@ -1067,7 +1085,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
             </div>
           </div>
         </div>
-      ) : (
+      ) : visualConfig.component === 'VideoPoseUploadVisual' ? null : (
         <div className="absolute bottom-4 right-4 z-50">
           <div className="bg-gray-800/80 backdrop-blur-sm rounded-lg p-3">
             <label className="flex items-center gap-2 text-sm text-white cursor-pointer">

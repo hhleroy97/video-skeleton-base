@@ -3,9 +3,35 @@
  */
 import type { PoseResults } from '@/types/mediapipe';
 
+// Load MediaPipe from CDN script tags (same resilience pattern as hands/face loaders)
+const loadMediaPipeScript = (src: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+    document.head.appendChild(script);
+  });
+};
+
 // Lazy load Pose class - using dynamic import
 let PoseClass: any = null;
 let poseLoadPromise: Promise<any> | null = null;
+
+const resolvePoseConstructor = (module: any): any => {
+  if (!module) return null;
+  if (typeof module.Pose === 'function') return module.Pose;
+  if (typeof module.default === 'function') return module.default;
+  if (module.default && typeof module.default.Pose === 'function') return module.default.Pose;
+  if (module.default && module.default.default && typeof module.default.default.Pose === 'function') {
+    return module.default.default.Pose;
+  }
+  return null;
+};
 
 const getPose = async (): Promise<any> => {
   // Ensure we're in the browser
@@ -20,35 +46,37 @@ const getPose = async (): Promise<any> => {
   
   // Load module if not already loading
   if (!poseLoadPromise) {
-    poseLoadPromise = import('@mediapipe/pose')
-      .then((module) => {
-        // Try named export first
-        if (module.Pose && typeof module.Pose === 'function') {
-          PoseClass = module.Pose;
-          return PoseClass;
-        }
-        
-        // Try default export
-        const defaultExport = (module as any).default;
-        if (defaultExport) {
-          if (defaultExport.Pose && typeof defaultExport.Pose === 'function') {
-            PoseClass = defaultExport.Pose;
-            return PoseClass;
-          }
-          if (typeof defaultExport === 'function') {
-            PoseClass = defaultExport;
-            return PoseClass;
-          }
-        }
-        
-        console.error('Pose not found in module. Keys:', Object.keys(module));
-        return null;
-      })
-      .catch((error) => {
-        console.error('Failed to import @mediapipe/pose:', error);
-        poseLoadPromise = null;
-        return null;
-      });
+    poseLoadPromise = (async () => {
+      // Prefer CDN globals first; this mirrors Hands/Face and is robust across bundlers.
+      await loadMediaPipeScript('https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js');
+      if ((window as any).Pose && typeof (window as any).Pose === 'function') {
+        PoseClass = (window as any).Pose;
+        return PoseClass;
+      }
+
+      // Fallback to package import for environments where global is unavailable.
+      const module = await import('@mediapipe/pose');
+      const resolved = resolvePoseConstructor(module);
+      if (resolved) {
+        PoseClass = resolved;
+        return PoseClass;
+      }
+
+      // Final fallback if side effects attached Pose to window during import.
+      if ((window as any).Pose && typeof (window as any).Pose === 'function') {
+        PoseClass = (window as any).Pose;
+        return PoseClass;
+      }
+
+      const moduleKeys = module ? Object.keys(module) : [];
+      const defaultKeys = (module as any)?.default ? Object.keys((module as any).default) : [];
+      console.error('Pose not found in module. Keys:', moduleKeys, 'default keys:', defaultKeys);
+      return null;
+    })().catch((error) => {
+      console.error('Failed to load @mediapipe/pose:', error);
+      poseLoadPromise = null;
+      return null;
+    });
   }
   
   return poseLoadPromise;

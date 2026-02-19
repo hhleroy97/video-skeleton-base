@@ -71,16 +71,23 @@ export function HandsHome() {
 
         {/* Visualizations Grid */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {visuals.map((visual) => (
+          {visuals.map((visual) => {
+            const tagLabel = visual.tag ?? 'Hand tracking';
+            const isDataVisualization = tagLabel.toLowerCase() === 'data visualization';
+            return (
             <Card key={visual.id} className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <CardTitle className="leading-tight">{visual.name}</CardTitle>
                   <span
-                    className="shrink-0 rounded-full bg-blue-600/15 px-2 py-1 text-[11px] font-medium text-blue-700"
-                    aria-label="Hand tracking badge"
+                    className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-medium ${
+                      isDataVisualization
+                        ? 'bg-violet-600/15 text-violet-700'
+                        : 'bg-blue-600/15 text-blue-700'
+                    }`}
+                    aria-label="Visual tag"
                   >
-                    Hand tracking
+                    {tagLabel}
                   </span>
                 </div>
                 <CardDescription>{visual.description}</CardDescription>
@@ -124,7 +131,8 @@ export function HandsHome() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       </div>
     </main>

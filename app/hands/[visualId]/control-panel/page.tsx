@@ -10,6 +10,8 @@ import { OneLineHandVisual, type OneLineHandControls, DEFAULT_ONE_LINE_CONTROLS 
 import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_CONTROLS } from '@/components/hand-tracking/ConstellationVisual';
 import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/hand-tracking/constellationPalettes';
 import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS, countExtendedFingers, type FingerDebugInfo } from '@/components/hand-tracking/MidasTouchVisual';
+import { PcaStoryVisual } from '@/components/hand-tracking/PcaStoryVisual';
+import { VideoPoseUploadVisual } from '@/components/hand-tracking/VideoPoseUploadVisual';
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -179,6 +181,18 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
             <MidasTouchVisual hands={hands3D} controls={midasTouchControls} />
           </div>
         );
+      case 'PcaStoryVisual':
+        return (
+          <div className="w-full h-96">
+            <PcaStoryVisual hands={hands3D} />
+          </div>
+        );
+      case 'VideoPoseUploadVisual':
+        return (
+          <div className="w-full h-[32rem]">
+            <VideoPoseUploadVisual />
+          </div>
+        );
       // Add more component cases here as needed
       default:
         return <div>Visual component not implemented yet</div>;
@@ -275,7 +289,17 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
               </div>
             </CardContent>
           </Card>
-        ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' ? (
+        ) : visualConfig.component === 'VideoPoseUploadVisual' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Uploaded Video Pose Tracking</CardTitle>
+              <CardDescription>
+                Upload a prerecorded clip and run MediaPipe body tracking directly on the video.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>{renderVisual()}</CardContent>
+          </Card>
+        ) : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' || visualConfig.component === 'PcaStoryVisual' ? (
           // Layout for 3D hand visualization
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
@@ -312,7 +336,7 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
               <Card>
                 <CardHeader>
                   <CardTitle>
-                    {visualConfig.component === 'Hand3DVisual' ? '3D Hand Visualization' : visualConfig.component === 'PrismHandVisual' ? 'Prism Hand Visualization' : visualConfig.component === 'OneLineHandVisual' ? 'One Unbroken Line' : visualConfig.component === 'MidasTouchVisual' ? 'Midas Touch' : 'Constellation'}
+                    {visualConfig.component === 'Hand3DVisual' ? '3D Hand Visualization' : visualConfig.component === 'PrismHandVisual' ? 'Prism Hand Visualization' : visualConfig.component === 'OneLineHandVisual' ? 'One Unbroken Line' : visualConfig.component === 'MidasTouchVisual' ? 'Midas Touch' : visualConfig.component === 'PcaStoryVisual' ? 'PCA Story Theater' : 'Constellation'}
                   </CardTitle>
                   <CardDescription>
                     {visualConfig.component === 'Hand3DVisual'
@@ -323,6 +347,8 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
                           ? 'Minimalist continuous stroke with fractal-like noise'
                           : visualConfig.component === 'MidasTouchVisual'
                             ? 'Transform materials with your hands: clay to gold, stone to crystal'
+                            : visualConfig.component === 'PcaStoryVisual'
+                              ? 'Hand-driven PCA walkthrough with state navigation and interpolation scrubbing'
                             : 'Your hand as a cosmos: 21 stars with nebulae'}
                   </CardDescription>
                   {visualConfig.component === 'Hand3DVisual' && (
