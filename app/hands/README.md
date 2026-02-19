@@ -234,10 +234,12 @@ Upload any prerecorded video and apply MediaPipe Pose body tracking directly on 
   - Choose **trim start / trim end** to focus on a section
   - Enable **Loop within trim window** to repeatedly play the selected segment
   - Pose skeleton and landmarks render on top of the uploaded clip
-  - Step events (foot down→up reversal) are marked as yellow points on-video and on a timeline strip
+  - Step events use a smoothed gait-phase detector (`stance`/`swing`) with contact-aware hysteresis
+  - Step markers are color-coded by foot (left/right) on-video and on the timeline strip
   - Markers shift using border-based camera-motion estimation (camera/global motion, not body-following)
   - Final view includes a camera-motion vector overlay (`dx`, `dy`)
   - **Step sensitivity slider** tunes detection as a percentage of heel-to-ankle span (scale-aware in 3D/depth changes)
+  - **Point size scale** slider controls marker-size amplification while preserving relative step magnitude
   - Includes a foot-motion isolator sub-window with left/right 2D layouts of ankle, heel, and toe points
 - **Notes**:
   - Uses MediaPipe Pose with a 33-point landmark overlay

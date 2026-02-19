@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { estimateBorderTranslation, rgbaToGrayscale, sampleBorderPoints } from '@/lib/cameraMotion';
 import { createPoseDetector, POSE_CONNECTIONS_LIST, processPoseResults } from '@/lib/mediapipe/pose';
-import { isStepTransition } from '@/lib/stepDetection';
+import { smoothEwma, updateGaitPhase } from '@/lib/stepDetection';
 import { normalizeTrimWindow, resolvePlaybackBoundary } from '@/lib/videoTrim';
 
 interface VideoPoseUploadVisualProps {
@@ -30,6 +30,12 @@ interface FootLayoutPoint {
 interface FootLayoutData {
   left: FootLayoutPoint[] | null;
   right: FootLayoutPoint[] | null;
+}
+
+interface FootTrackerState {
+  smoothedY: number | null;
+  phase: 'stance' | 'swing';
+  swingStartTime: number | null;
 }
 
 const extractFootLayout = (
@@ -113,6 +119,67 @@ const getSideHeelToAnkleSpan = (
   return span;
 };
 
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+const getSideFootPoints = (
+  landmarks: Array<{ x: number; y: number; visibility?: number }> | null,
+  side: 'left' | 'right',
+  visibilityThreshold: number = 0.35
+): Array<{ x: number; y: number }> | null => {
+  if (!landmarks || landmarks.length < 33) return null;
+  const indices = side === 'left' ? [27, 29, 31] : [28, 30, 32];
+  const points: Array<{ x: number; y: number }> = [];
+  for (const index of indices) {
+    const point = landmarks[index];
+    if (!point) continue;
+    if ((point.visibility ?? 1) < visibilityThreshold) continue;
+    points.push({ x: point.x, y: point.y });
+  }
+  return points.length > 0 ? points : null;
+};
+
+const computeFootContactScore = (
+  landmarks: Array<{ x: number; y: number; visibility?: number }> | null,
+  side: 'left' | 'right',
+  currentGray: Uint8Array,
+  previousGray: Uint8Array | null,
+  width: number,
+  height: number,
+  cameraDxPx: number,
+  cameraDyPx: number
+): number => {
+  if (!previousGray) return 0.5;
+  const points = getSideFootPoints(landmarks, side);
+  if (!points) return 0.5;
+
+  const radius = 3;
+  let diffSum = 0;
+  let sampleCount = 0;
+
+  for (const point of points) {
+    const cx = Math.round(point.x * width);
+    const cy = Math.round(point.y * height);
+    for (let oy = -radius; oy <= radius; oy += 1) {
+      for (let ox = -radius; ox <= radius; ox += 1) {
+        const x = cx + ox;
+        const y = cy + oy;
+        const prevX = Math.round(cx - cameraDxPx + ox);
+        const prevY = Math.round(cy - cameraDyPx + oy);
+        if (x < 0 || x >= width || y < 0 || y >= height) continue;
+        if (prevX < 0 || prevX >= width || prevY < 0 || prevY >= height) continue;
+        const currentValue = currentGray[y * width + x];
+        const previousValue = previousGray[prevY * width + prevX];
+        diffSum += Math.abs(currentValue - previousValue);
+        sampleCount += 1;
+      }
+    }
+  }
+
+  if (sampleCount === 0) return 0.5;
+  const avgDiff = diffSum / sampleCount;
+  return clamp01(1 - avgDiff / 48);
+};
+
 const drawPose = (
   ctx: CanvasRenderingContext2D,
   landmarks: Array<{ x: number; y: number; visibility?: number }>
@@ -168,12 +235,15 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
   const [cameraMotion, setCameraMotion] = useState({ dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 });
   const [footLayout, setFootLayout] = useState<FootLayoutData>({ left: null, right: null });
   const stepMarkersRef = useRef<StepMarker[]>([]);
-  const prevFootYRef = useRef<Record<'left' | 'right', number | null>>({ left: null, right: null });
-  const prevFootVelocityRef = useRef<Record<'left' | 'right', number | null>>({ left: null, right: null });
   const lastStepTimeRef = useRef<Record<'left' | 'right', number>>({ left: -Infinity, right: -Infinity });
   const previousBorderSamplesRef = useRef<ReturnType<typeof sampleBorderPoints> | null>(null);
+  const previousGrayFrameRef = useRef<Uint8Array | null>(null);
   const frameIndexRef = useRef(0);
   const cameraMotionRef = useRef({ dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 });
+  const footTrackerRef = useRef<Record<'left' | 'right', FootTrackerState>>({
+    left: { smoothedY: null, phase: 'stance', swingStartTime: null },
+    right: { smoothedY: null, phase: 'stance', swingStartTime: null },
+  });
 
   const cleanupLoop = useCallback(() => {
     if (rafRef.current !== null) {
@@ -187,9 +257,12 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     frameIndexRef.current = 0;
     cameraMotionRef.current = { dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 };
     setCameraMotion(cameraMotionRef.current);
-    prevFootYRef.current = { left: null, right: null };
-    prevFootVelocityRef.current = { left: null, right: null };
     lastStepTimeRef.current = { left: -Infinity, right: -Infinity };
+    previousGrayFrameRef.current = null;
+    footTrackerRef.current = {
+      left: { smoothedY: null, phase: 'stance', swingStartTime: null },
+      right: { smoothedY: null, phase: 'stance', swingStartTime: null },
+    };
 
     stepMarkersRef.current = [];
     setStepMarkers([]);
@@ -238,11 +311,12 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const gray = rgbaToGrayscale(imageData.data, canvas.width, canvas.height);
+
       // Estimate camera/global frame motion from border-only matching.
       frameIndexRef.current += 1;
       if (frameIndexRef.current % 2 === 0) {
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const gray = rgbaToGrayscale(imageData.data, canvas.width, canvas.height);
         const borderSamples = sampleBorderPoints(gray, canvas.width, canvas.height, 10, 22);
         if (previousBorderSamplesRef.current) {
           const raw = estimateBorderTranslation(
@@ -284,6 +358,78 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
       const latestPose = latestPoseRef.current;
       if (latestPose && latestPose.length > 0) {
         drawPose(ctx, latestPose);
+
+        const sensitivityRatio = Math.max(0.001, stepSensitivityPercent / 100);
+        (['left', 'right'] as const).forEach((side) => {
+          const footAnchor = getSideFootAnchor(latestPose, side);
+          const heelToAnkleSpan = getSideHeelToAnkleSpan(latestPose, side);
+          if (!footAnchor || !heelToAnkleSpan) return;
+
+          const tracker = footTrackerRef.current[side];
+          const smoothedY = smoothEwma(tracker.smoothedY, footAnchor.y, 0.35);
+          if (tracker.smoothedY === null) {
+            tracker.smoothedY = smoothedY;
+            return;
+          }
+
+          const normalizedVelocity = (smoothedY - tracker.smoothedY) / heelToAnkleSpan;
+          const contactScore = computeFootContactScore(
+            latestPose,
+            side,
+            gray,
+            previousGrayFrameRef.current,
+            canvas.width,
+            canvas.height,
+            cameraMotionRef.current.dx,
+            cameraMotionRef.current.dy
+          );
+
+          const nextPhase = updateGaitPhase(tracker.phase, normalizedVelocity, contactScore, {
+            contactEnterStance: 0.72,
+            contactExitStance: 0.5,
+            velocityEnterSwing: sensitivityRatio,
+            velocityEnterStance: sensitivityRatio * 0.55,
+          });
+
+          if (tracker.phase === 'stance' && nextPhase === 'swing') {
+            tracker.swingStartTime = video.currentTime;
+          }
+
+          const swingDuration =
+            tracker.swingStartTime === null ? 0 : video.currentTime - tracker.swingStartTime;
+          if (
+            tracker.phase === 'swing' &&
+            nextPhase === 'stance' &&
+            swingDuration > 0.12 &&
+            video.currentTime - lastStepTimeRef.current[side] > 0.25
+          ) {
+            lastStepTimeRef.current[side] = video.currentTime;
+            const stepMagnitude = Math.abs(normalizedVelocity);
+            setStepMarkers((previous) => {
+              const next = [
+                ...previous,
+                {
+                  time: video.currentTime,
+                  x: footAnchor.x,
+                  y: footAnchor.y,
+                  camRefX: cameraMotionRef.current.cumulativeX,
+                  camRefY: cameraMotionRef.current.cumulativeY,
+                  foot: side,
+                  stepMagnitude,
+                },
+              ];
+              const limited = next.slice(-200);
+              stepMarkersRef.current = limited;
+              return limited;
+            });
+          }
+
+          tracker.phase = nextPhase;
+          if (nextPhase === 'stance') {
+            tracker.swingStartTime = null;
+          }
+          tracker.smoothedY = smoothedY;
+        });
       }
 
       const markers = stepMarkersRef.current;
@@ -312,6 +458,8 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         frameCountRef.current = 0;
         lastFpsUpdateRef.current = now;
       }
+
+      previousGrayFrameRef.current = gray;
     }
 
     if (!video.paused && !video.ended) {
@@ -321,7 +469,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     } else {
       setIsPlaying(false);
     }
-  }, [loopPlayback, pointSizeScale, resetLoopRelativeMotion, trimEnd, trimStart]);
+  }, [loopPlayback, pointSizeScale, resetLoopRelativeMotion, stepSensitivityPercent, trimEnd, trimStart]);
 
   useEffect(() => {
     let isMounted = true;
@@ -341,50 +489,6 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
           setFootLayout({
             left: extractFootLayout(poseLandmarks, 'left'),
             right: extractFootLayout(poseLandmarks, 'right'),
-          });
-
-          const video = videoRef.current;
-          if (!video || !poseLandmarks) return;
-          const sensitivityRatio = Math.max(0.001, stepSensitivityPercent / 100);
-
-          (['left', 'right'] as const).forEach((side) => {
-            const footAnchor = getSideFootAnchor(poseLandmarks, side);
-            const heelToAnkleSpan = getSideHeelToAnkleSpan(poseLandmarks, side);
-            if (!footAnchor || !heelToAnkleSpan) return;
-
-            const previousY = prevFootYRef.current[side];
-            if (previousY !== null) {
-              const normalizedVelocity = (footAnchor.y - previousY) / heelToAnkleSpan;
-              const stepMagnitude = Math.abs(normalizedVelocity);
-              if (
-                isStepTransition(prevFootVelocityRef.current[side], normalizedVelocity, {
-                  downThreshold: sensitivityRatio,
-                  upThreshold: sensitivityRatio,
-                }) &&
-                video.currentTime - lastStepTimeRef.current[side] > 0.25
-              ) {
-                lastStepTimeRef.current[side] = video.currentTime;
-                setStepMarkers((previous) => {
-                  const next = [
-                    ...previous,
-                    {
-                      time: video.currentTime,
-                      x: footAnchor.x,
-                      y: footAnchor.y,
-                      camRefX: cameraMotionRef.current.cumulativeX,
-                      camRefY: cameraMotionRef.current.cumulativeY,
-                      foot: side,
-                      stepMagnitude,
-                    },
-                  ];
-                  const limited = next.slice(-200);
-                  stepMarkersRef.current = limited;
-                  return limited;
-                });
-              }
-              prevFootVelocityRef.current[side] = normalizedVelocity;
-            }
-            prevFootYRef.current[side] = footAnchor.y;
           });
         });
 
@@ -416,7 +520,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         currentObjectUrlRef.current = null;
       }
     };
-  }, [cleanupLoop, stepSensitivityPercent]);
+  }, [cleanupLoop]);
 
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -437,12 +541,15 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     setStepMarkers([]);
     setFootLayout({ left: null, right: null });
     stepMarkersRef.current = [];
-    prevFootYRef.current = { left: null, right: null };
-    prevFootVelocityRef.current = { left: null, right: null };
     lastStepTimeRef.current = { left: -Infinity, right: -Infinity };
     previousBorderSamplesRef.current = null;
+    previousGrayFrameRef.current = null;
     frameIndexRef.current = 0;
     cameraMotionRef.current = { dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 };
+    footTrackerRef.current = {
+      left: { smoothedY: null, phase: 'stance', swingStartTime: null },
+      right: { smoothedY: null, phase: 'stance', swingStartTime: null },
+    };
     setCameraMotion(cameraMotionRef.current);
     latestPoseRef.current = null;
 

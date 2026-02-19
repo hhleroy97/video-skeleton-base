@@ -5,6 +5,15 @@ export interface StepThresholds {
   upThreshold?: number;
 }
 
+export type GaitPhase = 'stance' | 'swing';
+
+export interface GaitThresholds {
+  contactEnterStance?: number;
+  contactExitStance?: number;
+  velocityEnterSwing?: number;
+  velocityEnterStance?: number;
+}
+
 const DEFAULT_DOWN_THRESHOLD = 0.0015;
 const DEFAULT_UP_THRESHOLD = 0.0015;
 
@@ -17,6 +26,39 @@ export function isStepTransition(
   const downThreshold = thresholds.downThreshold ?? DEFAULT_DOWN_THRESHOLD;
   const upThreshold = thresholds.upThreshold ?? DEFAULT_UP_THRESHOLD;
   return previousVelocity > downThreshold && currentVelocity < -upThreshold;
+}
+
+export function smoothEwma(previous: number | null, next: number, alpha: number = 0.35): number {
+  if (previous === null) return next;
+  const clampedAlpha = Math.max(0.01, Math.min(1, alpha));
+  return previous * (1 - clampedAlpha) + next * clampedAlpha;
+}
+
+export function updateGaitPhase(
+  phase: GaitPhase,
+  normalizedVelocity: number,
+  contactScore: number,
+  thresholds: GaitThresholds = {}
+): GaitPhase {
+  const contactEnterStance = thresholds.contactEnterStance ?? 0.7;
+  const contactExitStance = thresholds.contactExitStance ?? 0.5;
+  const velocityEnterSwing = thresholds.velocityEnterSwing ?? 0.055;
+  const velocityEnterStance = thresholds.velocityEnterStance ?? 0.03;
+
+  const speed = Math.abs(normalizedVelocity);
+  if (phase === 'stance') {
+    // Exit stance when contact weakens and motion grows.
+    if (contactScore < contactExitStance && speed > velocityEnterSwing) {
+      return 'swing';
+    }
+    return 'stance';
+  }
+
+  // In swing, re-enter stance when contact is strong and velocity settles.
+  if (contactScore > contactEnterStance && speed < velocityEnterStance) {
+    return 'stance';
+  }
+  return 'swing';
 }
 
 export function getFootAnchorPoint(

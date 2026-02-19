@@ -1,4 +1,11 @@
-import { getAverageHeelToAnkleSpan, getBodyReferencePoint, getFootAnchorPoint, isStepTransition } from '@/lib/stepDetection';
+import {
+  getAverageHeelToAnkleSpan,
+  getBodyReferencePoint,
+  getFootAnchorPoint,
+  isStepTransition,
+  smoothEwma,
+  updateGaitPhase,
+} from '@/lib/stepDetection';
 import type { PoseLandmark } from '@/types/mediapipe';
 
 const makePose = (): PoseLandmark[] =>
@@ -7,6 +14,17 @@ const makePose = (): PoseLandmark[] =>
 describe('stepDetection', () => {
   it('detects down-to-up velocity reversal as step', () => {
     expect(isStepTransition(0.004, -0.003)).toBe(true);
+  });
+
+  it('smooths values with ewma', () => {
+    expect(smoothEwma(null, 0.3, 0.4)).toBeCloseTo(0.3, 6);
+    expect(smoothEwma(0.2, 0.6, 0.5)).toBeCloseTo(0.4, 6);
+  });
+
+  it('uses gait phase hysteresis transitions', () => {
+    expect(updateGaitPhase('stance', 0.08, 0.3)).toBe('swing');
+    expect(updateGaitPhase('swing', 0.01, 0.85)).toBe('stance');
+    expect(updateGaitPhase('swing', 0.09, 0.4)).toBe('swing');
   });
 
   it('does not detect step without proper reversal', () => {
