@@ -11,6 +11,8 @@ interface VideoPoseUploadVisualProps {
   className?: string;
 }
 
+type SourceMode = 'upload' | 'realtime';
+
 interface StepMarker {
   time: number;
   x: number;
@@ -262,6 +264,8 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
   const poseRef = useRef<any>(null);
   const segmentationMaskRef = useRef<any>(null);
   const personLayerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const realtimeStartPerfRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
   const latestPoseRef = useRef<Array<{ x: number; y: number; visibility?: number }> | null>(null);
   const currentObjectUrlRef = useRef<string | null>(null);
@@ -271,6 +275,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
 
   const [isPoseReady, setIsPoseReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [sourceMode, setSourceMode] = useState<SourceMode>('upload');
   const [error, setError] = useState<string | null>(null);
   const [videoName, setVideoName] = useState<string>('');
   const [fps, setFps] = useState(0);
@@ -351,6 +356,44 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     setStepMarkers([]);
   }, []);
 
+  const resetDetectionState = useCallback(() => {
+    setStepMarkers([]);
+    setFootLayout({ left: null, right: null });
+    setStepDebug({
+      sampleTick: 0,
+      left: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+      right: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+    });
+    stepMarkersRef.current = [];
+    lastStepTimeRef.current = { left: -Infinity, right: -Infinity };
+    lastGroundFootRef.current = null;
+    previousBorderSamplesRef.current = null;
+    previousGrayFrameRef.current = null;
+    lastDetectionSampleTimeRef.current = -Infinity;
+    lastPoseUpdateTimeRef.current = -Infinity;
+    stableLandmarkSamplesRef.current = { left: 0, right: 0 };
+    lastStableSpanRef.current = { left: null, right: null };
+    previousContactScoreRef.current = { left: 0, right: 0 };
+    frameIndexRef.current = 0;
+    cameraMotionRef.current = { dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 };
+    footTrackerRef.current = {
+      left: { smoothedY: null, phase: 'stance', swingStartTime: null },
+      right: { smoothedY: null, phase: 'stance', swingStartTime: null },
+    };
+    setCameraMotion(cameraMotionRef.current);
+    latestPoseRef.current = null;
+    segmentationMaskRef.current = null;
+  }, []);
+
+  const stopRealtimeStream = useCallback(() => {
+    if (mediaStreamRef.current) {
+      for (const track of mediaStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      mediaStreamRef.current = null;
+    }
+  }, []);
+
   const drawFrame = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -376,20 +419,22 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
       }
       ensurePersonLayerCanvas(canvas.width, canvas.height);
 
-      const boundary = resolvePlaybackBoundary(video.currentTime, { start: trimStart, end: trimEnd }, loopPlayback);
-      const isLoopWrap =
-        loopPlayback &&
-        !boundary.shouldPause &&
-        boundary.nextTime < video.currentTime;
-      if (boundary.nextTime !== video.currentTime) {
-        if (isLoopWrap) {
-          resetLoopRelativeMotion();
+      if (sourceMode === 'upload') {
+        const boundary = resolvePlaybackBoundary(video.currentTime, { start: trimStart, end: trimEnd }, loopPlayback);
+        const isLoopWrap =
+          loopPlayback &&
+          !boundary.shouldPause &&
+          boundary.nextTime < video.currentTime;
+        if (boundary.nextTime !== video.currentTime) {
+          if (isLoopWrap) {
+            resetLoopRelativeMotion();
+          }
+          video.currentTime = boundary.nextTime;
         }
-        video.currentTime = boundary.nextTime;
-      }
-      if (boundary.shouldPause) {
-        video.pause();
-        setIsPlaying(false);
+        if (boundary.shouldPause) {
+          video.pause();
+          setIsPlaying(false);
+        }
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -439,9 +484,15 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         }
       }
 
+      const timelineNowSeconds =
+        sourceMode === 'realtime'
+          ? realtimeStartPerfRef.current === null
+            ? 0
+            : (performance.now() - realtimeStartPerfRef.current) / 1000
+          : video.currentTime;
       const latestPose = latestPoseRef.current;
       if (latestPose && latestPose.length > 0) {
-        const sampleTime = video.currentTime;
+        const sampleTime = timelineNowSeconds;
         const shouldRunSample =
           lastDetectionSampleTimeRef.current < 0 ||
           sampleTime - lastDetectionSampleTimeRef.current >= STEP_DETECTION_SAMPLE_INTERVAL;
@@ -574,7 +625,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         ctx.strokeStyle = '#111827';
         ctx.lineWidth = 2;
         for (const marker of markers) {
-          if (marker.time < trimStart || marker.time > trimEnd) continue;
+          if (sourceMode === 'upload' && (marker.time < trimStart || marker.time > trimEnd)) continue;
           const solidColor = marker.foot === 'left' ? '#22d3ee' : '#f472b6';
           const translucentColor =
             marker.foot === 'left' ? 'rgba(34, 211, 238, 0.65)' : 'rgba(244, 114, 182, 0.65)';
@@ -587,7 +638,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
             6,
             Math.min(canvas.height * 0.85, radius * 1.2 + marker.stepMagnitude * 260 * boxHeightScale)
           );
-          const markerAge = Math.max(0, video.currentTime - marker.time);
+          const markerAge = Math.max(0, timelineNowSeconds - marker.time);
           const growthProgress = Math.max(0, Math.min(1, markerAge / Math.max(0.05, boxGrowthSeconds)));
           const easedGrowth = 1 - Math.pow(1 - growthProgress, 3);
           const boxHeight = fullBoxHeight * easedGrowth;
@@ -650,7 +701,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     } else {
       setIsPlaying(false);
     }
-  }, [boxGrowthSeconds, boxHeightScale, ensurePersonLayerCanvas, loopPlayback, pointSizeScale, resetLoopRelativeMotion, showStepBoxes, showStepPoints, stepSensitivityPercent, trimEnd, trimStart]);
+  }, [boxGrowthSeconds, boxHeightScale, ensurePersonLayerCanvas, loopPlayback, pointSizeScale, resetLoopRelativeMotion, showStepBoxes, showStepPoints, sourceMode, stepSensitivityPercent, trimEnd, trimStart]);
 
   useEffect(() => {
     let isMounted = true;
@@ -697,6 +748,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     return () => {
       isMounted = false;
       cleanupLoop();
+      stopRealtimeStream();
       try {
         poseRef.current?.close?.();
       } catch {
@@ -710,7 +762,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         currentObjectUrlRef.current = null;
       }
     };
-  }, [cleanupLoop]);
+  }, [cleanupLoop, stopRealtimeStream]);
 
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -728,40 +780,18 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     setDuration(0);
     setTrimStart(0);
     setTrimEnd(0);
-    setStepMarkers([]);
-    setFootLayout({ left: null, right: null });
-    setStepDebug({
-      sampleTick: 0,
-      left: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
-      right: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
-    });
-    stepMarkersRef.current = [];
-    lastStepTimeRef.current = { left: -Infinity, right: -Infinity };
-    lastGroundFootRef.current = null;
-    previousBorderSamplesRef.current = null;
-    previousGrayFrameRef.current = null;
-    lastDetectionSampleTimeRef.current = -Infinity;
-    lastPoseUpdateTimeRef.current = -Infinity;
-    stableLandmarkSamplesRef.current = { left: 0, right: 0 };
-    lastStableSpanRef.current = { left: null, right: null };
-    previousContactScoreRef.current = { left: 0, right: 0 };
-    frameIndexRef.current = 0;
-    cameraMotionRef.current = { dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 };
-    footTrackerRef.current = {
-      left: { smoothedY: null, phase: 'stance', swingStartTime: null },
-      right: { smoothedY: null, phase: 'stance', swingStartTime: null },
-    };
-    setCameraMotion(cameraMotionRef.current);
-    latestPoseRef.current = null;
-    segmentationMaskRef.current = null;
+    resetDetectionState();
 
     const video = videoRef.current;
     if (video) {
+      stopRealtimeStream();
+      realtimeStartPerfRef.current = null;
+      video.srcObject = null;
       video.src = objectUrl;
       video.load();
       setIsPlaying(false);
     }
-  }, []);
+  }, [resetDetectionState, stopRealtimeStream]);
 
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current;
@@ -777,6 +807,36 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
   const handlePlayPause = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
+
+    if (sourceMode === 'realtime') {
+      if (video.paused) {
+        try {
+          if (!mediaStreamRef.current) {
+            mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'user' },
+              audio: false,
+            });
+          }
+          video.srcObject = mediaStreamRef.current;
+          await video.play();
+          if (realtimeStartPerfRef.current === null) {
+            realtimeStartPerfRef.current = performance.now();
+          }
+          setIsPlaying(true);
+          cleanupLoop();
+          rafRef.current = requestAnimationFrame(() => {
+            void drawFrame();
+          });
+        } catch (streamError: any) {
+          setError(streamError?.message ?? 'Could not access webcam.');
+        }
+      } else {
+        video.pause();
+        setIsPlaying(false);
+        cleanupLoop();
+      }
+      return;
+    }
 
     if (video.paused) {
       try {
@@ -798,7 +858,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
       setIsPlaying(false);
       cleanupLoop();
     }
-  }, [cleanupLoop, drawFrame, duration, trimEnd, trimStart]);
+  }, [cleanupLoop, drawFrame, duration, sourceMode, trimEnd, trimStart]);
 
   const handleTrimStartChange = useCallback((value: number) => {
     const normalized = normalizeTrimWindow(value, trimEnd, duration);
@@ -812,9 +872,44 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     setTrimEnd(normalized.end);
   }, [duration, trimStart]);
 
+  const handleClearPoints = useCallback(() => {
+    stepMarkersRef.current = [];
+    setStepMarkers([]);
+    // Reset alternation seed so either foot can trigger after a manual clear.
+    lastGroundFootRef.current = null;
+  }, []);
+
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || duration <= 0) return;
+    if (!video) return;
+
+    setError(null);
+    setIsPlaying(false);
+    cleanupLoop();
+    resetDetectionState();
+
+    if (sourceMode === 'upload') {
+      stopRealtimeStream();
+      realtimeStartPerfRef.current = null;
+      video.srcObject = null;
+      return;
+    }
+
+    // Entering realtime mode: clear file source and trim constraints.
+    if (currentObjectUrlRef.current) {
+      URL.revokeObjectURL(currentObjectUrlRef.current);
+      currentObjectUrlRef.current = null;
+    }
+    setVideoName('');
+    setDuration(0);
+    setTrimStart(0);
+    setTrimEnd(0);
+    video.src = '';
+  }, [cleanupLoop, resetDetectionState, sourceMode, stopRealtimeStream]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || duration <= 0 || sourceMode !== 'upload') return;
     const normalized = normalizeTrimWindow(trimStart, trimEnd, duration);
     if (normalized.start !== trimStart || normalized.end !== trimEnd) {
       setTrimStart(normalized.start);
@@ -826,27 +921,55 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     } else if (video.currentTime > normalized.end) {
       video.currentTime = normalized.end;
     }
-  }, [duration, trimEnd, trimStart]);
+  }, [duration, sourceMode, trimEnd, trimStart]);
 
   return (
     <div className={`w-full h-full overflow-y-auto bg-slate-950 text-white p-4 ${className}`}>
       <div className="max-w-5xl mx-auto space-y-4">
         <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded border border-slate-700 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSourceMode('upload')}
+              className={`px-3 py-2 text-xs ${sourceMode === 'upload' ? 'bg-blue-600 text-white' : 'bg-slate-900 text-slate-300'}`}
+            >
+              Uploaded video
+            </button>
+            <button
+              type="button"
+              onClick={() => setSourceMode('realtime')}
+              className={`px-3 py-2 text-xs ${sourceMode === 'realtime' ? 'bg-blue-600 text-white' : 'bg-slate-900 text-slate-300'}`}
+            >
+              Realtime camera
+            </button>
+          </div>
           <input
             type="file"
             accept="video/*"
             onChange={handleFileUpload}
+            disabled={sourceMode !== 'upload'}
             className="block text-sm text-slate-200 file:mr-4 file:rounded file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-white hover:file:bg-blue-700"
           />
           <button
             type="button"
             onClick={handlePlayPause}
-            disabled={!videoName || !isPoseReady}
+            disabled={(sourceMode === 'upload' && !videoName) || !isPoseReady}
             className="rounded bg-emerald-600 px-3 py-2 text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isPlaying ? 'Pause' : 'Play'}
           </button>
-          <span className="text-xs text-slate-300">{videoName || 'Upload a video to begin.'}</span>
+          {sourceMode === 'realtime' && (
+            <button
+              type="button"
+              onClick={handleClearPoints}
+              className="rounded bg-amber-600 px-3 py-2 text-sm hover:bg-amber-700"
+            >
+              Clear points
+            </button>
+          )}
+          <span className="text-xs text-slate-300">
+            {sourceMode === 'upload' ? (videoName || 'Upload a video to begin.') : 'Realtime webcam feed'}
+          </span>
         </div>
 
         <div className="rounded border border-slate-700 bg-black/40 p-2 text-xs text-slate-300 flex flex-wrap gap-4">
@@ -859,7 +982,8 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
           </span>
         </div>
 
-        <div className="rounded border border-slate-700 bg-black/40 p-3 space-y-3">
+        {sourceMode === 'upload' && (
+          <div className="rounded border border-slate-700 bg-black/40 p-3 space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-300">
             <span>Trim selection</span>
             <span>
@@ -997,7 +1121,8 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
               <span>Show step boxes</span>
             </label>
           </div>
-        </div>
+          </div>
+        )}
 
         {error && (
           <div className="rounded border border-red-700 bg-red-950/40 p-2 text-sm text-red-300">{error}</div>
