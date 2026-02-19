@@ -38,6 +38,26 @@ interface FootTrackerState {
   swingStartTime: number | null;
 }
 
+interface StepDebugSide {
+  phase: 'stance' | 'swing';
+  stableSamples: number;
+  contactScore: number;
+  normalizedVelocity: number;
+}
+
+interface StepDebugData {
+  sampleTick: number;
+  left: StepDebugSide;
+  right: StepDebugSide;
+}
+
+const STEP_DETECTION_SAMPLE_HZ = 20;
+const STEP_DETECTION_SAMPLE_INTERVAL = 1 / STEP_DETECTION_SAMPLE_HZ;
+const MIN_STABLE_LANDMARK_SAMPLES = 4;
+const MIN_STABLE_VISIBILITY = 0.55;
+const MAX_SPAN_DRIFT_RATIO = 0.45;
+const STEP_CONTACT_THRESHOLD = 0.72;
+
 const extractFootLayout = (
   landmarks: Array<{ x: number; y: number; visibility?: number }> | null,
   side: 'left' | 'right',
@@ -180,6 +200,33 @@ const computeFootContactScore = (
   return clamp01(1 - avgDiff / 48);
 };
 
+const getFootLandmarkStability = (
+  landmarks: Array<{ x: number; y: number; visibility?: number }> | null,
+  side: 'left' | 'right',
+  previousSpan: number | null
+): { isStable: boolean; span: number | null } => {
+  if (!landmarks || landmarks.length < 33) return { isStable: false, span: null };
+  const ankleIndex = side === 'left' ? 27 : 28;
+  const heelIndex = side === 'left' ? 29 : 30;
+  const toeIndex = side === 'left' ? 31 : 32;
+
+  const ankle = landmarks[ankleIndex];
+  const heel = landmarks[heelIndex];
+  const toe = landmarks[toeIndex];
+  if (!ankle || !heel || !toe) return { isStable: false, span: null };
+  if ((ankle.visibility ?? 0) < MIN_STABLE_VISIBILITY) return { isStable: false, span: null };
+  if ((heel.visibility ?? 0) < MIN_STABLE_VISIBILITY) return { isStable: false, span: null };
+  if ((toe.visibility ?? 0) < MIN_STABLE_VISIBILITY) return { isStable: false, span: null };
+
+  const span = Math.abs(heel.y - ankle.y);
+  if (!Number.isFinite(span) || span <= 1e-6) return { isStable: false, span: null };
+  if (previousSpan !== null) {
+    const spanDrift = Math.abs(span - previousSpan) / Math.max(previousSpan, 1e-6);
+    if (spanDrift > MAX_SPAN_DRIFT_RATIO) return { isStable: false, span };
+  }
+  return { isStable: true, span };
+};
+
 const drawPose = (
   ctx: CanvasRenderingContext2D,
   landmarks: Array<{ x: number; y: number; visibility?: number }>
@@ -213,6 +260,8 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseRef = useRef<any>(null);
+  const segmentationMaskRef = useRef<any>(null);
+  const personLayerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const latestPoseRef = useRef<Array<{ x: number; y: number; visibility?: number }> | null>(null);
   const currentObjectUrlRef = useRef<string | null>(null);
@@ -232,14 +281,29 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
   const [stepMarkers, setStepMarkers] = useState<StepMarker[]>([]);
   const [stepSensitivityPercent, setStepSensitivityPercent] = useState(6);
   const [pointSizeScale, setPointSizeScale] = useState(1.2);
+  const [boxHeightScale, setBoxHeightScale] = useState(12);
+  const [boxGrowthSeconds, setBoxGrowthSeconds] = useState(0.4);
+  const [showStepPoints, setShowStepPoints] = useState(true);
+  const [showStepBoxes, setShowStepBoxes] = useState(true);
   const [cameraMotion, setCameraMotion] = useState({ dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 });
   const [footLayout, setFootLayout] = useState<FootLayoutData>({ left: null, right: null });
+  const [stepDebug, setStepDebug] = useState<StepDebugData>({
+    sampleTick: 0,
+    left: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+    right: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+  });
   const stepMarkersRef = useRef<StepMarker[]>([]);
   const lastStepTimeRef = useRef<Record<'left' | 'right', number>>({ left: -Infinity, right: -Infinity });
   const previousBorderSamplesRef = useRef<ReturnType<typeof sampleBorderPoints> | null>(null);
   const previousGrayFrameRef = useRef<Uint8Array | null>(null);
   const frameIndexRef = useRef(0);
   const cameraMotionRef = useRef({ dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 });
+  const lastGroundFootRef = useRef<'left' | 'right' | null>(null);
+  const lastDetectionSampleTimeRef = useRef<number>(-Infinity);
+  const lastPoseUpdateTimeRef = useRef<number>(-Infinity);
+  const stableLandmarkSamplesRef = useRef<Record<'left' | 'right', number>>({ left: 0, right: 0 });
+  const lastStableSpanRef = useRef<Record<'left' | 'right', number | null>>({ left: null, right: null });
+  const previousContactScoreRef = useRef<Record<'left' | 'right', number>>({ left: 0, right: 0 });
   const footTrackerRef = useRef<Record<'left' | 'right', FootTrackerState>>({
     left: { smoothedY: null, phase: 'stance', swingStartTime: null },
     right: { smoothedY: null, phase: 'stance', swingStartTime: null },
@@ -252,13 +316,32 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     }
   }, []);
 
+  const ensurePersonLayerCanvas = useCallback((width: number, height: number): HTMLCanvasElement | null => {
+    if (typeof document === 'undefined') return null;
+    if (!personLayerCanvasRef.current) {
+      personLayerCanvasRef.current = document.createElement('canvas');
+    }
+    const layer = personLayerCanvasRef.current;
+    if (layer.width !== width || layer.height !== height) {
+      layer.width = width;
+      layer.height = height;
+    }
+    return layer;
+  }, []);
+
   const resetLoopRelativeMotion = useCallback(() => {
     previousBorderSamplesRef.current = null;
     frameIndexRef.current = 0;
     cameraMotionRef.current = { dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 };
     setCameraMotion(cameraMotionRef.current);
     lastStepTimeRef.current = { left: -Infinity, right: -Infinity };
+    lastGroundFootRef.current = null;
     previousGrayFrameRef.current = null;
+    lastDetectionSampleTimeRef.current = -Infinity;
+    lastPoseUpdateTimeRef.current = -Infinity;
+    stableLandmarkSamplesRef.current = { left: 0, right: 0 };
+    lastStableSpanRef.current = { left: null, right: null };
+    previousContactScoreRef.current = { left: 0, right: 0 };
     footTrackerRef.current = {
       left: { smoothedY: null, phase: 'stance', swingStartTime: null },
       right: { smoothedY: null, phase: 'stance', swingStartTime: null },
@@ -291,6 +374,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
+      ensurePersonLayerCanvas(canvas.width, canvas.height);
 
       const boundary = resolvePlaybackBoundary(video.currentTime, { start: trimStart, end: trimEnd }, loopPlayback);
       const isLoopWrap =
@@ -357,98 +441,195 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
 
       const latestPose = latestPoseRef.current;
       if (latestPose && latestPose.length > 0) {
-        drawPose(ctx, latestPose);
+        const sampleTime = video.currentTime;
+        const shouldRunSample =
+          lastDetectionSampleTimeRef.current < 0 ||
+          sampleTime - lastDetectionSampleTimeRef.current >= STEP_DETECTION_SAMPLE_INTERVAL;
+        const poseIsFresh =
+          lastPoseUpdateTimeRef.current >= 0 &&
+          Math.abs(sampleTime - lastPoseUpdateTimeRef.current) <= 0.2;
 
-        const sensitivityRatio = Math.max(0.001, stepSensitivityPercent / 100);
-        (['left', 'right'] as const).forEach((side) => {
-          const footAnchor = getSideFootAnchor(latestPose, side);
-          const heelToAnkleSpan = getSideHeelToAnkleSpan(latestPose, side);
-          if (!footAnchor || !heelToAnkleSpan) return;
+        if (shouldRunSample && poseIsFresh) {
+          lastDetectionSampleTimeRef.current = sampleTime;
+          const sensitivityRatio = Math.max(0.001, stepSensitivityPercent / 100);
+          const nextDebug: StepDebugData = {
+            sampleTick: 0,
+            left: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+            right: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+          };
+          (['left', 'right'] as const).forEach((side) => {
+            const tracker = footTrackerRef.current[side];
+            const stability = getFootLandmarkStability(latestPose, side, lastStableSpanRef.current[side]);
+            lastStableSpanRef.current[side] = stability.span;
+            if (!stability.isStable) {
+              stableLandmarkSamplesRef.current[side] = 0;
+              tracker.phase = 'stance';
+              tracker.swingStartTime = null;
+              previousContactScoreRef.current[side] = 0;
+              nextDebug[side] = {
+                phase: 'stance',
+                stableSamples: 0,
+                contactScore: 0,
+                normalizedVelocity: 0,
+              };
+              return;
+            }
 
-          const tracker = footTrackerRef.current[side];
-          const smoothedY = smoothEwma(tracker.smoothedY, footAnchor.y, 0.35);
-          if (tracker.smoothedY === null) {
-            tracker.smoothedY = smoothedY;
-            return;
-          }
+            stableLandmarkSamplesRef.current[side] += 1;
+            const footAnchor = getSideFootAnchor(latestPose, side);
+            const heelToAnkleSpan = getSideHeelToAnkleSpan(latestPose, side);
+            if (!footAnchor || !heelToAnkleSpan) return;
+            const smoothedY = smoothEwma(tracker.smoothedY, footAnchor.y, 0.35);
+            if (
+              tracker.smoothedY === null ||
+              stableLandmarkSamplesRef.current[side] < MIN_STABLE_LANDMARK_SAMPLES
+            ) {
+              tracker.smoothedY = smoothedY;
+              previousContactScoreRef.current[side] = 0;
+              nextDebug[side] = {
+                phase: tracker.phase,
+                stableSamples: stableLandmarkSamplesRef.current[side],
+                contactScore: 0,
+                normalizedVelocity: 0,
+              };
+              return;
+            }
 
-          const normalizedVelocity = (smoothedY - tracker.smoothedY) / heelToAnkleSpan;
-          const contactScore = computeFootContactScore(
-            latestPose,
-            side,
-            gray,
-            previousGrayFrameRef.current,
-            canvas.width,
-            canvas.height,
-            cameraMotionRef.current.dx,
-            cameraMotionRef.current.dy
-          );
+            const normalizedVelocity = (smoothedY - tracker.smoothedY) / heelToAnkleSpan;
+            const contactScore = computeFootContactScore(
+              latestPose,
+              side,
+              gray,
+              previousGrayFrameRef.current,
+              canvas.width,
+              canvas.height,
+              cameraMotionRef.current.dx,
+              cameraMotionRef.current.dy
+            );
 
-          const nextPhase = updateGaitPhase(tracker.phase, normalizedVelocity, contactScore, {
-            contactEnterStance: 0.72,
-            contactExitStance: 0.5,
-            velocityEnterSwing: sensitivityRatio,
-            velocityEnterStance: sensitivityRatio * 0.55,
-          });
-
-          if (tracker.phase === 'stance' && nextPhase === 'swing') {
-            tracker.swingStartTime = video.currentTime;
-          }
-
-          const swingDuration =
-            tracker.swingStartTime === null ? 0 : video.currentTime - tracker.swingStartTime;
-          if (
-            tracker.phase === 'swing' &&
-            nextPhase === 'stance' &&
-            swingDuration > 0.12 &&
-            video.currentTime - lastStepTimeRef.current[side] > 0.25
-          ) {
-            lastStepTimeRef.current[side] = video.currentTime;
-            const stepMagnitude = Math.abs(normalizedVelocity);
-            setStepMarkers((previous) => {
-              const next = [
-                ...previous,
-                {
-                  time: video.currentTime,
-                  x: footAnchor.x,
-                  y: footAnchor.y,
-                  camRefX: cameraMotionRef.current.cumulativeX,
-                  camRefY: cameraMotionRef.current.cumulativeY,
-                  foot: side,
-                  stepMagnitude,
-                },
-              ];
-              const limited = next.slice(-200);
-              stepMarkersRef.current = limited;
-              return limited;
+            const nextPhase = updateGaitPhase(tracker.phase, normalizedVelocity, contactScore, {
+              contactEnterStance: STEP_CONTACT_THRESHOLD,
+              contactExitStance: 0.5,
+              velocityEnterSwing: sensitivityRatio,
+              velocityEnterStance: sensitivityRatio * 0.55,
             });
-          }
 
-          tracker.phase = nextPhase;
-          if (nextPhase === 'stance') {
-            tracker.swingStartTime = null;
-          }
-          tracker.smoothedY = smoothedY;
-        });
+            if (tracker.phase === 'stance' && nextPhase === 'swing') {
+              tracker.swingStartTime = sampleTime;
+            }
+
+            const previousContact = previousContactScoreRef.current[side];
+            const crossedIntoContact =
+              previousContact < STEP_CONTACT_THRESHOLD &&
+              contactScore >= STEP_CONTACT_THRESHOLD;
+            if (
+              crossedIntoContact &&
+              (lastGroundFootRef.current === null || lastGroundFootRef.current !== side) &&
+              sampleTime - lastStepTimeRef.current[side] > 0.25
+            ) {
+              lastStepTimeRef.current[side] = sampleTime;
+              lastGroundFootRef.current = side;
+              const stepMagnitude = contactScore;
+              setStepMarkers((previous) => {
+                const next = [
+                  ...previous,
+                  {
+                    time: sampleTime,
+                    x: footAnchor.x,
+                    y: footAnchor.y,
+                    camRefX: cameraMotionRef.current.cumulativeX,
+                    camRefY: cameraMotionRef.current.cumulativeY,
+                    foot: side,
+                    stepMagnitude,
+                  },
+                ];
+                const limited = next.slice(-200);
+                stepMarkersRef.current = limited;
+                return limited;
+              });
+            }
+            previousContactScoreRef.current[side] = contactScore;
+
+            tracker.phase = nextPhase;
+            if (nextPhase === 'stance') {
+              tracker.swingStartTime = null;
+            }
+            tracker.smoothedY = smoothedY;
+            nextDebug[side] = {
+              phase: nextPhase,
+              stableSamples: stableLandmarkSamplesRef.current[side],
+              contactScore,
+              normalizedVelocity,
+            };
+          });
+          setStepDebug((previous) => ({
+            ...nextDebug,
+            sampleTick: previous.sampleTick + 1,
+          }));
+        }
       }
 
       const markers = stepMarkersRef.current;
-      if (markers.length > 0) {
+      if (markers.length > 0 && (showStepPoints || showStepBoxes)) {
         ctx.strokeStyle = '#111827';
         ctx.lineWidth = 2;
         for (const marker of markers) {
           if (marker.time < trimStart || marker.time > trimEnd) continue;
-          ctx.fillStyle = marker.foot === 'left' ? '#22d3ee' : '#f472b6';
+          const solidColor = marker.foot === 'left' ? '#22d3ee' : '#f472b6';
+          const translucentColor =
+            marker.foot === 'left' ? 'rgba(34, 211, 238, 0.65)' : 'rgba(244, 114, 182, 0.65)';
           const offsetX = cameraMotionRef.current.cumulativeX - marker.camRefX;
           const offsetY = cameraMotionRef.current.cumulativeY - marker.camRefY;
           const drawX = (marker.x + offsetX) * canvas.width;
           const drawY = (marker.y + offsetY) * canvas.height;
           const radius = Math.max(4, Math.min(24, 4 + marker.stepMagnitude * 40 * pointSizeScale));
-          ctx.beginPath();
-          ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
+          const fullBoxHeight = Math.max(
+            6,
+            Math.min(canvas.height * 0.85, radius * 1.2 + marker.stepMagnitude * 260 * boxHeightScale)
+          );
+          const markerAge = Math.max(0, video.currentTime - marker.time);
+          const growthProgress = Math.max(0, Math.min(1, markerAge / Math.max(0.05, boxGrowthSeconds)));
+          const easedGrowth = 1 - Math.pow(1 - growthProgress, 3);
+          const boxHeight = fullBoxHeight * easedGrowth;
+          const boxWidth = Math.max(6, radius * 1.15);
+          if (showStepBoxes) {
+            // Grow a box upward from the center of the marker, scaled by raw step magnitude.
+            ctx.fillStyle = translucentColor;
+            ctx.fillRect(drawX - boxWidth / 2, drawY - boxHeight, boxWidth, boxHeight);
+            ctx.strokeStyle = solidColor;
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(drawX - boxWidth / 2, drawY - boxHeight, boxWidth, boxHeight);
+          }
+          if (showStepPoints) {
+            ctx.fillStyle = solidColor;
+            ctx.beginPath();
+            ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#111827';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
         }
+      }
+
+      // Composite segmented person on top of background/marker layers.
+      const segmentationMask = segmentationMaskRef.current;
+      const personLayer = personLayerCanvasRef.current;
+      if (segmentationMask && personLayer) {
+        const personCtx = personLayer.getContext('2d');
+        if (personCtx) {
+          personCtx.clearRect(0, 0, personLayer.width, personLayer.height);
+          personCtx.drawImage(segmentationMask, 0, 0, personLayer.width, personLayer.height);
+          personCtx.globalCompositeOperation = 'source-in';
+          personCtx.drawImage(video, 0, 0, personLayer.width, personLayer.height);
+          personCtx.globalCompositeOperation = 'source-over';
+          ctx.drawImage(personLayer, 0, 0, canvas.width, canvas.height);
+        }
+      }
+
+      // Pose stays on top of the person cutout.
+      if (latestPose && latestPose.length > 0) {
+        drawPose(ctx, latestPose);
       }
 
       frameCountRef.current += 1;
@@ -469,7 +650,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     } else {
       setIsPlaying(false);
     }
-  }, [loopPlayback, pointSizeScale, resetLoopRelativeMotion, stepSensitivityPercent, trimEnd, trimStart]);
+  }, [boxGrowthSeconds, boxHeightScale, ensurePersonLayerCanvas, loopPlayback, pointSizeScale, resetLoopRelativeMotion, showStepBoxes, showStepPoints, stepSensitivityPercent, trimEnd, trimStart]);
 
   useEffect(() => {
     let isMounted = true;
@@ -480,11 +661,18 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
           minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5,
           smoothLandmarks: true,
+          enableSegmentation: true,
+          smoothSegmentation: true,
         });
 
         pose.onResults((results: any) => {
           const processed = processPoseResults(results);
           const poseLandmarks = processed?.poseLandmarks ?? null;
+          segmentationMaskRef.current = results?.segmentationMask ?? null;
+          const video = videoRef.current;
+          if (video) {
+            lastPoseUpdateTimeRef.current = video.currentTime;
+          }
           latestPoseRef.current = poseLandmarks;
           setFootLayout({
             left: extractFootLayout(poseLandmarks, 'left'),
@@ -515,6 +703,8 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         // ignore
       }
       poseRef.current = null;
+      segmentationMaskRef.current = null;
+      personLayerCanvasRef.current = null;
       if (currentObjectUrlRef.current) {
         URL.revokeObjectURL(currentObjectUrlRef.current);
         currentObjectUrlRef.current = null;
@@ -540,10 +730,21 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     setTrimEnd(0);
     setStepMarkers([]);
     setFootLayout({ left: null, right: null });
+    setStepDebug({
+      sampleTick: 0,
+      left: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+      right: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+    });
     stepMarkersRef.current = [];
     lastStepTimeRef.current = { left: -Infinity, right: -Infinity };
+    lastGroundFootRef.current = null;
     previousBorderSamplesRef.current = null;
     previousGrayFrameRef.current = null;
+    lastDetectionSampleTimeRef.current = -Infinity;
+    lastPoseUpdateTimeRef.current = -Infinity;
+    stableLandmarkSamplesRef.current = { left: 0, right: 0 };
+    lastStableSpanRef.current = { left: null, right: null };
+    previousContactScoreRef.current = { left: 0, right: 0 };
     frameIndexRef.current = 0;
     cameraMotionRef.current = { dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 };
     footTrackerRef.current = {
@@ -552,6 +753,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     };
     setCameraMotion(cameraMotionRef.current);
     latestPoseRef.current = null;
+    segmentationMaskRef.current = null;
 
     const video = videoRef.current;
     if (video) {
@@ -737,6 +939,64 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
               Scales marker radius while preserving step-size-based differences.
             </div>
           </div>
+          <div>
+            <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+              <label htmlFor="box-height-scale">Step box height scale</label>
+              <span>{boxHeightScale.toFixed(1)}x</span>
+            </div>
+            <input
+              id="box-height-scale"
+              type="range"
+              min={0.5}
+              max={500}
+              step={0.5}
+              value={boxHeightScale}
+              onChange={(event) => setBoxHeightScale(parseFloat(event.target.value))}
+              className="w-full"
+            />
+            <div className="text-[11px] text-slate-400 mt-1">
+              Scales upward box growth from each marker center based on raw step size.
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+              <label htmlFor="box-growth-speed">Box growth duration</label>
+              <span>{boxGrowthSeconds.toFixed(2)}s</span>
+            </div>
+            <input
+              id="box-growth-speed"
+              type="range"
+              min={0.05}
+              max={3}
+              step={0.05}
+              value={boxGrowthSeconds}
+              onChange={(event) => setBoxGrowthSeconds(parseFloat(event.target.value))}
+              className="w-full"
+            />
+            <div className="text-[11px] text-slate-400 mt-1">
+              Controls how quickly step boxes grow from zero to full height.
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showStepPoints}
+                onChange={(event) => setShowStepPoints(event.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Show step points</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showStepBoxes}
+                onChange={(event) => setShowStepBoxes(event.target.checked)}
+                className="w-4 h-4"
+              />
+              <span>Show step boxes</span>
+            </label>
+          </div>
         </div>
 
         {error && (
@@ -768,6 +1028,26 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
               </div>
             </div>
           </div>
+        </div>
+        <div className="rounded border border-slate-700 bg-black/40 p-2">
+          <div className="text-xs text-slate-400 mb-2">Step detection debug (sampled timeline)</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-200">
+            <div className="rounded border border-cyan-700/40 bg-cyan-950/20 p-2">
+              <div className="font-medium text-cyan-300 mb-1">Left foot</div>
+              <div>phase: {stepDebug.left.phase}</div>
+              <div>stable samples: {stepDebug.left.stableSamples}</div>
+              <div>contact: {stepDebug.left.contactScore.toFixed(2)}</div>
+              <div>norm velocity: {stepDebug.left.normalizedVelocity.toFixed(3)}</div>
+            </div>
+            <div className="rounded border border-pink-700/40 bg-pink-950/20 p-2">
+              <div className="font-medium text-pink-300 mb-1">Right foot</div>
+              <div>phase: {stepDebug.right.phase}</div>
+              <div>stable samples: {stepDebug.right.stableSamples}</div>
+              <div>contact: {stepDebug.right.contactScore.toFixed(2)}</div>
+              <div>norm velocity: {stepDebug.right.normalizedVelocity.toFixed(3)}</div>
+            </div>
+          </div>
+          <div className="text-[11px] text-slate-400 mt-2">sample tick: {stepDebug.sampleTick}</div>
         </div>
         <div className="rounded border border-slate-700 bg-black/40 p-3">
           <div className="text-xs text-slate-400 mb-2">Foot motion isolator (ankle/heel/toe)</div>
