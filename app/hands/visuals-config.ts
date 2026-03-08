@@ -18,7 +18,9 @@ export interface VisualConfig {
     | 'ConstellationVisual'
     | 'MidasTouchVisual'
     | 'PcaStoryVisual'
-    | 'VideoPoseUploadVisual';
+    | 'VideoPoseUploadVisual'
+    | 'FlowerLifecycleVisual'
+    | 'StepFlowerDebugVisual';
   fullscreen?: boolean;
   enabled: boolean;
 }
@@ -95,6 +97,22 @@ export const visualsConfig: VisualConfig[] = [
     description: 'Upload any video and apply MediaPipe body tracking with a real-time pose overlay.',
     tag: 'Data visualization',
     component: 'VideoPoseUploadVisual',
+    fullscreen: true,
+    enabled: true,
+  },
+  {
+    id: 'viz10',
+    name: 'Flower Lifecycle',
+    description: 'Reusable 3D flower asset that grows, blooms, and wilts on an autoplay loop.',
+    component: 'FlowerLifecycleVisual',
+    fullscreen: true,
+    enabled: true,
+  },
+  {
+    id: 'viz11',
+    name: 'Step Flower Marker Lab',
+    description: 'Debug lab for the viz9 flower step-marker renderer (2D and pseudo-3D styles).',
+    component: 'StepFlowerDebugVisual',
     fullscreen: true,
     enabled: true,
   },

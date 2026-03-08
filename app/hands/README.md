@@ -93,6 +93,8 @@ Configurations are stored in your browser's localStorage, so they persist across
 - `FinalVectorVisual` - Vector-based visualization (to be implemented)
 - `Hand3DVisual` - 3D hand landmark scene (skeleton or GLB model overlay)
 - `VideoPoseUploadVisual` - Upload a video and run MediaPipe body pose overlay
+- `FlowerLifecycleVisual` - Reusable 3D flower asset autoplaying grow/bloom/wilt lifecycle
+- `StepFlowerDebugVisual` - Isolated debug lab for viz9 flower marker rendering
 
 ## Storyboard Script Packs
 
@@ -237,6 +239,24 @@ Upload any prerecorded video and apply MediaPipe Pose body tracking directly on 
   - Step events use a smoothed gait-phase detector (`stance`/`swing`) with contact-aware hysteresis
   - Step markers are color-coded by foot (left/right) on-video and on the timeline strip
   - Markers shift using border-based camera-motion estimation (camera/global motion, not body-following)
+  - Step marker style can switch between classic boxes, growing flowers, and growing flowers (3D)
+  - Flower markers now use seeded style variants (multiple growth templates + curated palettes), not only left/right foot colors
+  - Branching variants can spawn side stems that terminate as mini petals, leaves, or bare ends for extra silhouette diversity
+  - Main blossoms can render in multiple petal layers at offset heights/phases with layer-specific colors for added depth
+  - Stems are constrained to green tones, and leaves now render with dark-bottom to light-top gradient fills
+  - Toon texture mode can switch between `none`, `stipple`, and `hatch` for petal/leaf interior shading
+  - Flower marker animation now runs through a state machine (`growing -> holding -> decaying`) with state-driven plant transforms (sway, droop, scale, offset)
+  - Petals now bloom from a tight clustered bud to a full spread opening during growth
+  - Decay timing is intentionally longer to make wilt behavior read clearly in motion
+  - During decay, pollen disappears first, leaves droop/drop and shift toward fall tones, petals transition into fall colors, and stems shift from greens through olive to brown while shrinking
+  - Branch stems and attached leaves inherit parent-stem motion, so connected structures stay spatially coherent while the plant wilts
+  - Blossom centers include a pollen core for added visual readability
+  - Includes a shared **whimsy intensity** control to scale outlines and squash/stretch behavior
+  - Adds dedicated **Bloom timing** and **Decay timing** sliders for tuning flower lifecycle speed
+  - Includes a **Body tracking model** toggle to disable pose/segmentation processing while keeping marker playback controls available
+  - Includes a **Show body cam points** toggle to hide/show the full pose overlay (landmark dots + body lines) on top of the video
+  - Realtime mode includes a **Background segmentation (flowers behind person)** toggle that composites the person above flower markers
+  - Marker controls sync across upload/realtime and persist across visual pages (dev, final view, and control panel)
   - Final view includes a camera-motion vector overlay (`dx`, `dy`)
   - **Step sensitivity slider** tunes detection as a percentage of heel-to-ankle span (scale-aware in 3D/depth changes)
   - **Point size scale** slider controls marker-size amplification while preserving relative step magnitude
@@ -244,6 +264,43 @@ Upload any prerecorded video and apply MediaPipe Pose body tracking directly on 
 - **Notes**:
   - Uses MediaPipe Pose with a 33-point landmark overlay
   - Designed for demos, analysis clips, and presentation-ready body tracking replays
+
+## Flower Lifecycle (viz10)
+
+A reusable 3D asset visual that plays a full flower lifecycle in 3D space: growth, bloom, and wilting.
+
+- **Route**: `/hands/viz10`
+- **Control panel**: `/hands/viz10/control-panel`
+- **Final view**: `/hands/viz10/final_view`
+- **Interaction**:
+  - Autoplay timeline by default (no hand-tracking required)
+  - Loops through phases: `grow -> bloom -> wilt`
+  - Generates a new flower variation at each loop boundary, with multiple connected blossoms
+  - Adds branch-attached leaves that emerge with stem growth and wilt with the same lifecycle
+  - Accepts normalized phase override (`0..1`) for deterministic external control
+- **Implementation notes**:
+  - Timeline math lives in `lib/flowerLifecycle.ts` (pure utility, testable)
+  - Line-art generation lives in `lib/flowerLineArt.ts`
+  - Visual component lives in `components/hand-tracking/FlowerLifecycleVisual.tsx`
+  - Uses L-system branching for connected stem/branch structure and cubic Bezier curves for petals
+  - Entire flower grows/wilts as one connected line organism (not independent part scaling)
+
+## Step Flower Marker Lab (viz11)
+
+Dedicated debug surface for the flower markers used by `VideoPoseUploadVisual` (`viz9`).
+
+- **Route**: `/hands/viz11`
+- **Control panel**: `/hands/viz11/control-panel`
+- **Final view**: `/hands/viz11/final_view`
+- **Purpose**:
+  - Iterate on the flower marker look and timing without requiring video upload or realtime pose input
+  - Reuses `lib/stepFlowerAsset.ts` generation paths (`flowers` and `flowers-3d`) so visual tweaks match viz9 marker behavior
+  - Keeps grow/hold/shrink lifecycle behavior aligned with marker animation tuning
+  - Cycles through seeded flower variants with different growth templates and palette sets
+  - Includes toon outlines, squash/stretch bloom, and sparkle accents to preview the final whimsical look
+- **Controls**:
+  - Marker style (`Growing flowers` or `Growing flowers (3D)`)
+  - Step magnitude, point scale, bloom timing, decay timing, spawn interval, and whimsy intensity
 
 ## Features
 

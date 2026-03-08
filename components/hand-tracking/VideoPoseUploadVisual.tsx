@@ -3,8 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { estimateBorderTranslation, rgbaToGrayscale, sampleBorderPoints } from '@/lib/cameraMotion';
+import { getFlowerMarkerLifecycleFrame, type FlowerMarkerLifecycleFrame } from '@/lib/flowerMarkerLifecycle';
+import { generateStepFlowerShape, generateStepFlowerSprite3D, getStepFlowerVariant } from '@/lib/stepFlowerAsset';
 import { createPoseDetector, POSE_CONNECTIONS_LIST, processPoseResults } from '@/lib/mediapipe/pose';
 import { smoothEwma, updateGaitPhase } from '@/lib/stepDetection';
+import {
+  DEFAULT_VIDEO_POSE_MARKER_SETTINGS,
+  loadVideoPoseMarkerSettings,
+  saveVideoPoseMarkerSettings,
+  type VideoPoseStepMarkerStyle,
+  type VideoPoseToonTextureMode,
+} from '@/lib/videoPoseSettingsStorage';
 import { normalizeTrimWindow, resolvePlaybackBoundary } from '@/lib/videoTrim';
 
 interface VideoPoseUploadVisualProps {
@@ -12,6 +21,8 @@ interface VideoPoseUploadVisualProps {
 }
 
 type SourceMode = 'upload' | 'realtime';
+type StepMarkerStyle = VideoPoseStepMarkerStyle;
+type ToonTextureMode = VideoPoseToonTextureMode;
 
 interface StepMarker {
   time: number;
@@ -231,8 +242,10 @@ const getFootLandmarkStability = (
 
 const drawPose = (
   ctx: CanvasRenderingContext2D,
-  landmarks: Array<{ x: number; y: number; visibility?: number }>
+  landmarks: Array<{ x: number; y: number; visibility?: number }>,
+  renderOverlay: boolean
 ) => {
+  if (!renderOverlay) return;
   const width = ctx.canvas.width;
   const height = ctx.canvas.height;
 
@@ -284,12 +297,21 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
   const [trimEnd, setTrimEnd] = useState(0);
   const [loopPlayback, setLoopPlayback] = useState(false);
   const [stepMarkers, setStepMarkers] = useState<StepMarker[]>([]);
-  const [stepSensitivityPercent, setStepSensitivityPercent] = useState(6);
-  const [pointSizeScale, setPointSizeScale] = useState(1.2);
-  const [boxHeightScale, setBoxHeightScale] = useState(12);
-  const [boxGrowthSeconds, setBoxGrowthSeconds] = useState(0.4);
-  const [showStepPoints, setShowStepPoints] = useState(true);
-  const [showStepBoxes, setShowStepBoxes] = useState(true);
+  const [bodyTrackingEnabled, setBodyTrackingEnabled] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.bodyTrackingEnabled);
+  const [showBodyCamPoints, setShowBodyCamPoints] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.showBodyCamPoints);
+  const [realtimeBackgroundSegmentationEnabled, setRealtimeBackgroundSegmentationEnabled] = useState(
+    DEFAULT_VIDEO_POSE_MARKER_SETTINGS.realtimeBackgroundSegmentationEnabled
+  );
+  const [stepSensitivityPercent, setStepSensitivityPercent] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.stepSensitivityPercent);
+  const [pointSizeScale, setPointSizeScale] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.pointSizeScale);
+  const [boxHeightScale, setBoxHeightScale] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.boxHeightScale);
+  const [boxGrowthSeconds, setBoxGrowthSeconds] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.boxGrowthSeconds);
+  const [flowerBloomSeconds, setFlowerBloomSeconds] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.flowerBloomSeconds);
+  const [flowerDecaySeconds, setFlowerDecaySeconds] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.flowerDecaySeconds);
+  const [whimsyIntensity, setWhimsyIntensity] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.whimsyIntensity);
+  const [toonTextureMode, setToonTextureMode] = useState<ToonTextureMode>(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.toonTextureMode);
+  const [showStepPoints, setShowStepPoints] = useState(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.showStepPoints);
+  const [stepMarkerStyle, setStepMarkerStyle] = useState<StepMarkerStyle>(DEFAULT_VIDEO_POSE_MARKER_SETTINGS.stepMarkerStyle);
   const [cameraMotion, setCameraMotion] = useState({ dx: 0, dy: 0, cumulativeX: 0, cumulativeY: 0 });
   const [footLayout, setFootLayout] = useState<FootLayoutData>({ left: null, right: null });
   const [stepDebug, setStepDebug] = useState<StepDebugData>({
@@ -298,6 +320,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     right: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
   });
   const stepMarkersRef = useRef<StepMarker[]>([]);
+  const sourceModeRef = useRef<SourceMode>('upload');
   const lastStepTimeRef = useRef<Record<'left' | 'right', number>>({ left: -Infinity, right: -Infinity });
   const previousBorderSamplesRef = useRef<ReturnType<typeof sampleBorderPoints> | null>(null);
   const previousGrayFrameRef = useRef<Uint8Array | null>(null);
@@ -313,6 +336,79 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     left: { smoothedY: null, phase: 'stance', swingStartTime: null },
     right: { smoothedY: null, phase: 'stance', swingStartTime: null },
   });
+
+  useEffect(() => {
+    sourceModeRef.current = sourceMode;
+  }, [sourceMode]);
+
+  useEffect(() => {
+    const loaded = loadVideoPoseMarkerSettings();
+    setBodyTrackingEnabled(loaded.bodyTrackingEnabled);
+    setShowBodyCamPoints(loaded.showBodyCamPoints);
+    setRealtimeBackgroundSegmentationEnabled(loaded.realtimeBackgroundSegmentationEnabled);
+    setStepSensitivityPercent(loaded.stepSensitivityPercent);
+    setPointSizeScale(loaded.pointSizeScale);
+    setBoxHeightScale(loaded.boxHeightScale);
+    setBoxGrowthSeconds(loaded.boxGrowthSeconds);
+    setFlowerBloomSeconds(loaded.flowerBloomSeconds);
+    setFlowerDecaySeconds(loaded.flowerDecaySeconds);
+    setWhimsyIntensity(loaded.whimsyIntensity);
+    setToonTextureMode(loaded.toonTextureMode);
+    setShowStepPoints(loaded.showStepPoints);
+    setStepMarkerStyle(loaded.stepMarkerStyle);
+  }, []);
+
+  useEffect(() => {
+    saveVideoPoseMarkerSettings({
+      bodyTrackingEnabled,
+      showBodyCamPoints,
+      realtimeBackgroundSegmentationEnabled,
+      stepSensitivityPercent,
+      pointSizeScale,
+      boxHeightScale,
+      boxGrowthSeconds,
+      flowerBloomSeconds,
+      flowerDecaySeconds,
+      whimsyIntensity,
+      toonTextureMode,
+      showStepPoints,
+      stepMarkerStyle,
+    });
+  }, [
+    bodyTrackingEnabled,
+    boxGrowthSeconds,
+    boxHeightScale,
+    flowerBloomSeconds,
+    flowerDecaySeconds,
+    pointSizeScale,
+    realtimeBackgroundSegmentationEnabled,
+    showStepPoints,
+    showBodyCamPoints,
+    stepMarkerStyle,
+    stepSensitivityPercent,
+    whimsyIntensity,
+    toonTextureMode,
+  ]);
+
+  useEffect(() => {
+    if (bodyTrackingEnabled) return;
+    latestPoseRef.current = null;
+    segmentationMaskRef.current = null;
+    lastPoseUpdateTimeRef.current = -Infinity;
+    stableLandmarkSamplesRef.current = { left: 0, right: 0 };
+    lastStableSpanRef.current = { left: null, right: null };
+    previousContactScoreRef.current = { left: 0, right: 0 };
+    footTrackerRef.current = {
+      left: { smoothedY: null, phase: 'stance', swingStartTime: null },
+      right: { smoothedY: null, phase: 'stance', swingStartTime: null },
+    };
+    setFootLayout({ left: null, right: null });
+    setStepDebug({
+      sampleTick: 0,
+      left: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+      right: { phase: 'stance', stableSamples: 0, contactScore: 0, normalizedVelocity: 0 },
+    });
+  }, [bodyTrackingEnabled]);
 
   const cleanupLoop = useCallback(() => {
     if (rafRef.current !== null) {
@@ -473,7 +569,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         previousBorderSamplesRef.current = borderSamples;
       }
 
-      if (poseRef.current && !processingFrameRef.current && !video.paused && !video.ended) {
+      if (bodyTrackingEnabled && poseRef.current && !processingFrameRef.current && !video.paused && !video.ended) {
         try {
           processingFrameRef.current = true;
           await poseRef.current.send({ image: video });
@@ -621,14 +717,539 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
       }
 
       const markers = stepMarkersRef.current;
-      if (markers.length > 0 && (showStepPoints || showStepBoxes)) {
+      const shouldOverlayFlowersRealtime =
+        sourceMode === 'realtime' &&
+        !realtimeBackgroundSegmentationEnabled &&
+        (stepMarkerStyle === 'flowers' || stepMarkerStyle === 'flowers-3d');
+      const drawFlowerMarker = (
+        marker: StepMarker,
+        drawX: number,
+        drawY: number,
+        lifecycle: FlowerMarkerLifecycleFrame
+      ) => {
+        const lifeScale = lifecycle.lifeScale;
+        if (lifeScale <= 0.001) return;
+        const seed = Math.floor(marker.time * 1000 + marker.stepMagnitude * 1000);
+        const variant = getStepFlowerVariant(seed);
+        const palette = variant.palette;
+        const markerScale = marker.stepMagnitude * boxHeightScale * 0.025;
+        const sprite3d =
+          stepMarkerStyle === 'flowers-3d'
+            ? generateStepFlowerSprite3D(seed, lifeScale, markerScale)
+            : null;
+        const flowerShape = sprite3d
+          ? sprite3d.shape
+          : generateStepFlowerShape(seed, lifeScale, markerScale);
+        const depthScale = sprite3d?.depthScale ?? 1;
+        const whimsy = Math.max(0, whimsyIntensity);
+        const squashX = lifecycle.transform.scaleX;
+        const stretchY = lifecycle.transform.scaleY;
+        const offsetY = lifecycle.transform.offsetY;
+        const sway = lifecycle.transform.sway;
+        const droop = lifecycle.transform.droop;
+        const bloomBoost = 1 + lifecycle.stateProgress * 0.18;
+        const seqProgress =
+          lifecycle.state === 'growing'
+            ? lifecycle.stateProgress
+            : lifecycle.state === 'holding'
+              ? 1
+              : 1 - lifecycle.stateProgress * 0.18;
+        const decayProgress = lifecycle.state === 'decaying' ? lifecycle.stateProgress : 0;
+        const segmentRamp = (start: number, end: number) => {
+          if (end <= start) return seqProgress >= end ? 1 : 0;
+          const t = Math.max(0, Math.min(1, (seqProgress - start) / (end - start)));
+          return t * t * (3 - 2 * t);
+        };
+        const stemReveal = segmentRamp(0.02, 0.48);
+        const leafReveal = segmentRamp(0.34, 0.7);
+        const pollenReveal = segmentRamp(0.56, 0.82);
+        const petalReveal = segmentRamp(0.7, 1);
+
+        const mapPoint = (point: { x: number; y: number }) => ({
+          x:
+            drawX +
+            point.x * depthScale * squashX +
+            point.y * depthScale * sway * 0.35,
+          y:
+            drawY +
+            offsetY +
+            point.y * depthScale * stretchY +
+            Math.abs(point.y) * droop * 0.05,
+        });
+        const toOpaqueTone = (hex: string, lift: number) => {
+          const clean = hex.trim().replace('#', '');
+          const expanded =
+            clean.length === 3
+              ? `${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`
+              : clean;
+          if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return 'rgb(24, 24, 32)';
+          const r = parseInt(expanded.slice(0, 2), 16);
+          const g = parseInt(expanded.slice(2, 4), 16);
+          const b = parseInt(expanded.slice(4, 6), 16);
+          if (lift >= 0) {
+            const k = Math.min(1, lift);
+            return `rgb(${Math.round(r + (255 - r) * k)}, ${Math.round(g + (255 - g) * k)}, ${Math.round(b + (255 - b) * k)})`;
+          }
+          const k = Math.max(0, 1 + lift);
+          return `rgb(${Math.round(r * k)}, ${Math.round(g * k)}, ${Math.round(b * k)})`;
+        };
+        const mixOpaqueHex = (fromHex: string, toHex: string, t: number) => {
+          const from = fromHex.trim().replace('#', '');
+          const to = toHex.trim().replace('#', '');
+          const expand = (v: string) =>
+            v.length === 3 ? `${v[0]}${v[0]}${v[1]}${v[1]}${v[2]}${v[2]}` : v;
+          const a = expand(from);
+          const b = expand(to);
+          if (!/^[0-9a-fA-F]{6}$/.test(a) || !/^[0-9a-fA-F]{6}$/.test(b)) return fromHex;
+          const p = Math.max(0, Math.min(1, t));
+          const ar = parseInt(a.slice(0, 2), 16);
+          const ag = parseInt(a.slice(2, 4), 16);
+          const ab = parseInt(a.slice(4, 6), 16);
+          const br = parseInt(b.slice(0, 2), 16);
+          const bg = parseInt(b.slice(2, 4), 16);
+          const bb = parseInt(b.slice(4, 6), 16);
+          return `rgb(${Math.round(ar + (br - ar) * p)}, ${Math.round(ag + (bg - ag) * p)}, ${Math.round(ab + (bb - ab) * p)})`;
+        };
+        const stemDecayColor =
+          decayProgress < 0.38
+            ? mixOpaqueHex('#16a34a', '#f59e0b', decayProgress / 0.38)
+            : mixOpaqueHex('#f59e0b', '#4a1f0f', (decayProgress - 0.38) / 0.62);
+        const botanicalLineColor = lifecycle.state === 'decaying' ? stemDecayColor : toOpaqueTone('#16a34a', 0.08);
+
+        const strokeOutlined = (points: Array<{ x: number; y: number }>, color: string, lineWidth: number) => {
+          if (whimsy > 0.01) {
+            const outlineAlphaBase = lifecycle.state === 'decaying' ? 0.16 : 0.34;
+            const outlineAlphaWhimsy = lifecycle.state === 'decaying' ? 0.24 : 0.44;
+            const outlineWidthWhimsy = lifecycle.state === 'decaying' ? 0.72 : 1.45;
+            ctx.strokeStyle = `rgba(2, 6, 23, ${outlineAlphaBase + whimsy * outlineAlphaWhimsy})`;
+            ctx.lineWidth = lineWidth * (1 + whimsy * outlineWidthWhimsy);
+            ctx.beginPath();
+            points.forEach((point, idx) => {
+              const p = mapPoint(point);
+              if (idx === 0) {
+                ctx.moveTo(p.x, p.y);
+              } else {
+                ctx.lineTo(p.x, p.y);
+              }
+            });
+            ctx.stroke();
+          }
+
+          ctx.strokeStyle = color;
+          ctx.lineWidth = lineWidth;
+          ctx.beginPath();
+          points.forEach((point, idx) => {
+            const p = mapPoint(point);
+            if (idx === 0) {
+              ctx.moveTo(p.x, p.y);
+            } else {
+              ctx.lineTo(p.x, p.y);
+            }
+          });
+          ctx.stroke();
+        };
+        const fillPetalGradient = (points: Array<{ x: number; y: number }>, petalColor: string) => {
+          if (points.length < 3) return;
+          const first = points[0];
+          const last = points[points.length - 1];
+          const tip = points[Math.floor(points.length / 2)];
+          const baseMapped = mapPoint({
+            x: (first.x + last.x) * 0.5,
+            y: (first.y + last.y) * 0.5,
+          });
+          const tipMapped = mapPoint(tip);
+          const darkBase = toOpaqueTone(petalColor, -0.48);
+          const brightTip = toOpaqueTone(petalColor, 0.62);
+          const gradient = ctx.createLinearGradient(baseMapped.x, baseMapped.y, tipMapped.x, tipMapped.y);
+          gradient.addColorStop(0, darkBase);
+          gradient.addColorStop(0.58, petalColor);
+          gradient.addColorStop(1, brightTip);
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          points.forEach((point, idx) => {
+            const p = mapPoint(point);
+            if (idx === 0) {
+              ctx.moveTo(p.x, p.y);
+            } else {
+              ctx.lineTo(p.x, p.y);
+            }
+          });
+          ctx.closePath();
+          ctx.fill();
+        };
+        const applyToonTexture = (
+          points: Array<{ x: number; y: number }>,
+          shadeColor: string,
+          strength: number
+        ) => {
+          if (toonTextureMode === 'none') return;
+          if (strength <= 0.01 || points.length < 3) return;
+          const mapped = points.map(mapPoint);
+          const minX = Math.min(...mapped.map((p) => p.x));
+          const maxX = Math.max(...mapped.map((p) => p.x));
+          const minY = Math.min(...mapped.map((p) => p.y));
+          const maxY = Math.max(...mapped.map((p) => p.y));
+          const spacing = Math.max(3.2, 7.2 - strength * 2.4);
+
+          ctx.save();
+          ctx.beginPath();
+          mapped.forEach((p, idx) => {
+            if (idx === 0) {
+              ctx.moveTo(p.x, p.y);
+            } else {
+              ctx.lineTo(p.x, p.y);
+            }
+          });
+          ctx.closePath();
+          ctx.clip();
+
+          const phase = Math.abs(seed % 97);
+          if (toonTextureMode === 'hatch') {
+            ctx.strokeStyle = shadeColor;
+            ctx.lineWidth = Math.max(0.45, 0.35 + strength * 0.6);
+            const span = Math.max(maxX - minX, maxY - minY) + spacing * 3;
+            for (let x = minX - span; x <= maxX + span; x += spacing) {
+              ctx.beginPath();
+              ctx.moveTo(x + phase, minY - spacing);
+              ctx.lineTo(x + span * 0.7 + phase, maxY + spacing);
+              ctx.stroke();
+            }
+          } else {
+            const dotSize = 0.7 + strength * 0.85;
+            ctx.fillStyle = shadeColor;
+            for (let y = minY - spacing; y <= maxY + spacing; y += spacing) {
+              for (let x = minX - spacing; x <= maxX + spacing; x += spacing) {
+                const checker = (Math.floor((x + phase) / spacing) + Math.floor((y + phase) / spacing)) % 2;
+                if (checker !== 0) continue;
+                ctx.beginPath();
+                ctx.arc(x, y, dotSize, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+          ctx.restore();
+        };
+        const fillLeafGradient = (points: Array<{ x: number; y: number }>) => {
+          if (points.length < 3) return;
+          const mapped = points.map(mapPoint);
+          const minY = Math.min(...mapped.map((p) => p.y));
+          const maxY = Math.max(...mapped.map((p) => p.y));
+          const centerX = mapped.reduce((sum, p) => sum + p.x, 0) / mapped.length;
+          const leafBaseColor = mixOpaqueHex(palette.leafStroke, '#b45309', decayProgress * 0.92);
+          const gradient = ctx.createLinearGradient(centerX, maxY, centerX, minY);
+          gradient.addColorStop(0, toOpaqueTone(leafBaseColor, -0.45));
+          gradient.addColorStop(0.6, leafBaseColor);
+          gradient.addColorStop(1, toOpaqueTone(leafBaseColor, 0.45));
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          mapped.forEach((p, idx) => {
+            if (idx === 0) {
+              ctx.moveTo(p.x, p.y);
+            } else {
+              ctx.lineTo(p.x, p.y);
+            }
+          });
+          ctx.closePath();
+          ctx.fill();
+        };
+        const trimStrokeByReveal = (points: Array<{ x: number; y: number }>, reveal: number) => {
+          if (reveal <= 0.001 || points.length <= 1) return [] as Array<{ x: number; y: number }>;
+          if (reveal >= 0.999) return points;
+          const idx = Math.max(1, Math.floor((points.length - 1) * reveal));
+          return points.slice(0, idx + 1);
+        };
+
+        const primaryLineWidth = 1.2 + lifeScale * 0.95;
+        const detailLineWidth = 1 + lifeScale * 0.75;
+        ctx.save();
+        const visibleAlpha =
+          lifecycle.state === 'decaying'
+            ? Math.max(0.18, lifeScale * 0.95 + 0.12)
+            : Math.max(0.1, lifeScale);
+        ctx.globalAlpha *= visibleAlpha;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        if (sprite3d) {
+          const shadowY = drawY + lifecycle.transform.offsetY + sprite3d.shadowOffsetY;
+          const shadowGrad = ctx.createRadialGradient(
+            drawX,
+            shadowY,
+            sprite3d.shadowRadius * 0.15,
+            drawX,
+            shadowY,
+            sprite3d.shadowRadius
+          );
+          shadowGrad.addColorStop(0, palette.shadowInner);
+          shadowGrad.addColorStop(1, palette.shadowOuter);
+          ctx.fillStyle = shadowGrad;
+          ctx.beginPath();
+          ctx.ellipse(
+            drawX,
+            shadowY,
+            sprite3d.shadowRadius * squashX * 1.08,
+            sprite3d.shadowRadius * 0.42 * Math.max(0.72, 1 - lifecycle.transform.droop * 0.9),
+            0,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+
+        const stemShrink = Math.max(0.14, 1 - decayProgress * 0.78);
+        const animateStemStroke = (
+          points: Array<{ x: number; y: number }>,
+          parentShift: { x: number; y: number } = { x: 0, y: 0 }
+        ) => {
+          const visibleBase = trimStrokeByReveal(points, stemReveal);
+          const stemRoot = visibleBase[0] ?? { x: 0, y: 0 };
+          const visible = visibleBase.map((p) => ({
+            x: stemRoot.x + (p.x - stemRoot.x) * stemShrink + parentShift.x,
+            y:
+              stemRoot.y +
+              (p.y - stemRoot.y) * stemShrink +
+              decayProgress * Math.abs(p.y - stemRoot.y) * 0.34 +
+              parentShift.y,
+          }));
+          return { visibleBase, visible };
+        };
+
+        const mainStem = animateStemStroke(flowerShape.stem.points);
+        const stemStrokes = [flowerShape.stem, ...(flowerShape.branches ?? [])];
+        const animatedStemRecords: Array<{
+          visibleBase: Array<{ x: number; y: number }>;
+          visible: Array<{ x: number; y: number }>;
+          baseTip: { x: number; y: number };
+          animatedTip: { x: number; y: number };
+          shift: { x: number; y: number };
+        }> = [];
+        for (let idx = 0; idx < stemStrokes.length; idx += 1) {
+          const stemStroke = stemStrokes[idx];
+          let parentShift = { x: 0, y: 0 };
+          if (idx > 0) {
+            const stemRoot = stemStroke.points[0] ?? { x: 0, y: 0 };
+            let bestDist = Number.POSITIVE_INFINITY;
+            let bestShift = { x: 0, y: 0 };
+            for (const parentStem of animatedStemRecords) {
+              for (let i = 0; i < parentStem.visibleBase.length; i += 1) {
+                const basePoint = parentStem.visibleBase[i];
+                const animatedPoint = parentStem.visible[i] ?? basePoint;
+                const dx = stemRoot.x - basePoint.x;
+                const dy = stemRoot.y - basePoint.y;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < bestDist) {
+                  bestDist = d2;
+                  bestShift = { x: animatedPoint.x - basePoint.x, y: animatedPoint.y - basePoint.y };
+                }
+              }
+            }
+            parentShift = bestShift;
+          }
+          const animated = idx === 0 ? mainStem : animateStemStroke(stemStroke.points, parentShift);
+          const baseTip =
+            animated.visibleBase[animated.visibleBase.length - 1] ??
+            stemStroke.points[stemStroke.points.length - 1] ?? { x: 0, y: 0 };
+          const animatedTip = animated.visible[animated.visible.length - 1] ?? baseTip;
+          animatedStemRecords.push({
+            visibleBase: animated.visibleBase,
+            visible: animated.visible,
+            baseTip,
+            animatedTip,
+            shift: { x: animatedTip.x - baseTip.x, y: animatedTip.y - baseTip.y },
+          });
+        }
+        for (const stemRecord of animatedStemRecords) {
+          if (stemRecord.visible.length > 1) {
+            strokeOutlined(
+              stemRecord.visible,
+              botanicalLineColor,
+              Math.max(0.65, primaryLineWidth * (1 - decayProgress * 0.28))
+            );
+          }
+        }
+        const mainStemRecord = animatedStemRecords[0];
+        const animatedTip = mainStemRecord?.animatedTip ?? { x: 0, y: 0 };
+        const getClosestStemRecord = (point: { x: number; y: number }) => {
+          let bestRecord = mainStemRecord;
+          let bestDist = Number.POSITIVE_INFINITY;
+          for (const stemRecord of animatedStemRecords) {
+            const dx = point.x - stemRecord.baseTip.x;
+            const dy = point.y - stemRecord.baseTip.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < bestDist) {
+              bestDist = d2;
+              bestRecord = stemRecord;
+            }
+          }
+          return bestRecord ?? {
+            visible: [] as Array<{ x: number; y: number }>,
+            baseTip: { x: 0, y: 0 },
+            animatedTip: { x: 0, y: 0 },
+            shift: { x: 0, y: 0 },
+          };
+        };
+
+        const getClosestStemPointShift = (point: { x: number; y: number }) => {
+          let bestShift = { x: 0, y: 0 };
+          let bestDist = Number.POSITIVE_INFINITY;
+          for (const stemRecord of animatedStemRecords) {
+            for (let i = 0; i < stemRecord.visibleBase.length; i += 1) {
+              const basePoint = stemRecord.visibleBase[i];
+              const animatedPoint = stemRecord.visible[i] ?? basePoint;
+              const dx = point.x - basePoint.x;
+              const dy = point.y - basePoint.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < bestDist) {
+                bestDist = d2;
+                bestShift = { x: animatedPoint.x - basePoint.x, y: animatedPoint.y - basePoint.y };
+              }
+            }
+          }
+          return bestShift;
+        };
+
+        for (const leaf of flowerShape.leaves) {
+          const base = leaf.points[0] ?? { x: 0, y: 0 };
+          const stemPointShift = getClosestStemPointShift(base);
+          const leafDroop = decayProgress * (0.9 + droop * 2.6);
+          const animated = leaf.points.map((p) => ({
+            x:
+              base.x +
+              stemPointShift.x +
+              (p.x - base.x) * leafReveal * (1 - decayProgress * 0.48) -
+              (p.x - base.x) * leafDroop * 0.22,
+            y:
+              base.y +
+              stemPointShift.y +
+              (p.y - base.y) * leafReveal * (1 - decayProgress * 0.24) +
+              decayProgress * (0.9 + Math.abs(p.x - base.x) * 0.18) +
+              leafDroop * (0.55 + Math.abs(p.x - base.x) * 0.24 + Math.max(0, -(p.y - base.y)) * 0.28),
+          }));
+          fillLeafGradient(animated);
+          applyToonTexture(animated, toOpaqueTone('#3f1d0d', -0.15), whimsy * 0.35 * leafReveal);
+          strokeOutlined(animated, botanicalLineColor, detailLineWidth);
+        }
+
+        const petalPalette = palette.petalLayerStrokes?.length ? palette.petalLayerStrokes : [palette.petalStroke];
+        for (const petal of flowerShape.petals) {
+          const petalBaseColor = petalPalette[petal.colorIndex % petalPalette.length] ?? palette.petalStroke;
+          const petalToGold = mixOpaqueHex(petalBaseColor, '#d97706', Math.min(1, decayProgress * 1.25));
+          const petalColor = mixOpaqueHex(petalToGold, '#7c2d12', Math.max(0, (decayProgress - 0.4) / 0.6));
+          const layeredWidth = Math.max(0.7, detailLineWidth * (1 - Math.min(0.35, petal.layer * 0.09)));
+          const base = petal.points[0] ?? { x: 0, y: 0 };
+          const gravityDrop = (1 - petalReveal) * (0.6 + whimsy * 0.35) * (1 + petal.layer * 0.2);
+          const bloomT = petalReveal * petalReveal * (3 - 2 * petalReveal);
+          const spread = 0.03 + bloomT * 1.02;
+          const lift = 0.08 + bloomT * 0.92;
+          const budPull = (1 - bloomT) * 0.34;
+          const petalDroop = decayProgress * (0.65 + droop * 2.4);
+          const animated = petal.points.map((p, idx) => {
+            const relX = p.x - base.x;
+            const relY = p.y - base.y;
+            const tipBias = idx / Math.max(1, petal.points.length - 1);
+            const stemRecord = getClosestStemRecord(base);
+            const stemShift = stemRecord.shift;
+            const anchorX = base.x + stemShift.x;
+            const anchorY = base.y + stemShift.y;
+            const bloomX = relX * spread * (1 - decayProgress * 0.22) - relX * budPull;
+            const bloomY =
+              relY * lift * (1 - decayProgress * 0.14) +
+              gravityDrop * (0.4 + tipBias * 0.9) +
+              Math.abs(relX) * (1 - petalReveal) * 0.12 +
+              decayProgress * (0.16 + tipBias * 0.36);
+            const wiltCollapse = 1 - Math.min(0.7, petalDroop * (0.5 + tipBias * 0.7));
+            const wiltTilt = petalDroop * (0.35 + tipBias * 0.95);
+            const wiltX = bloomX * wiltCollapse;
+            const wiltY =
+              bloomY +
+              petalDroop * (0.55 + tipBias * 1.45 + Math.abs(relX) * 0.45) +
+              Math.abs(wiltX) * wiltTilt * 0.9;
+            const centerDx = base.x - stemRecord.animatedTip.x;
+            const centerSign =
+              Math.abs(centerDx) > 0.001 ? Math.sign(centerDx) : Math.sign(relX || 1);
+            const rotateAway =
+              centerSign *
+              petalDroop *
+              (0.22 + tipBias * 0.55 + Math.min(0.3, Math.abs(centerDx) * 0.08));
+            const cosRot = Math.cos(rotateAway);
+            const sinRot = Math.sin(rotateAway);
+            const rotatedX = wiltX * cosRot - wiltY * sinRot;
+            const rotatedY = wiltX * sinRot + wiltY * cosRot;
+            return {
+              x: anchorX + rotatedX - relX * petalDroop * 0.22,
+              y: anchorY + rotatedY,
+            };
+          });
+          fillPetalGradient(animated, petalColor);
+          applyToonTexture(animated, toOpaqueTone(petalColor, -0.62), whimsy * (0.45 + petal.layer * 0.08) * petalReveal);
+          strokeOutlined(animated, petalColor, layeredWidth);
+        }
+
+        const blossomCenter = mapPoint(animatedTip);
+        const pollenRadius =
+          (sprite3d ? sprite3d.coreRadius * 0.85 : 1.5 + markerScale * 1.35) *
+          (0.82 + lifeScale * 0.35) *
+          pollenReveal *
+          (lifecycle.state === 'decaying' ? Math.max(0, 1 - decayProgress * 2.6) : 1);
+        ctx.fillStyle = palette.pollenFill;
+        ctx.strokeStyle = 'rgba(2, 6, 23, 0.72)';
+        ctx.lineWidth = Math.max(0.7, 0.55 + whimsy * 0.5);
+        if (pollenRadius > 0.01) {
+          ctx.beginPath();
+          ctx.arc(blossomCenter.x, blossomCenter.y, pollenRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        if (sprite3d) {
+          const blossomY = drawY + animatedTip.y * sprite3d.depthScale * stretchY;
+          const blossomGrad = ctx.createRadialGradient(
+            drawX,
+            blossomY,
+            sprite3d.coreRadius * 0.2,
+            drawX,
+            blossomY,
+            sprite3d.blossomRadius * bloomBoost
+          );
+          blossomGrad.addColorStop(0, palette.glowInner);
+          blossomGrad.addColorStop(1, palette.glowOuter);
+          ctx.fillStyle = blossomGrad;
+          ctx.beginPath();
+          ctx.ellipse(
+            drawX,
+            blossomY,
+            sprite3d.blossomRadius * squashX * bloomBoost,
+            sprite3d.blossomRadius * stretchY * bloomBoost,
+            0,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+
+        ctx.restore();
+      };
+      if (
+        markers.length > 0 &&
+        (showStepPoints || stepMarkerStyle === 'boxes' || stepMarkerStyle === 'flowers' || stepMarkerStyle === 'flowers-3d')
+      ) {
         ctx.strokeStyle = '#111827';
         ctx.lineWidth = 2;
         for (const marker of markers) {
           if (sourceMode === 'upload' && (marker.time < trimStart || marker.time > trimEnd)) continue;
-          const solidColor = marker.foot === 'left' ? '#22d3ee' : '#f472b6';
-          const translucentColor =
-            marker.foot === 'left' ? 'rgba(34, 211, 238, 0.65)' : 'rgba(244, 114, 182, 0.65)';
+          const markerSeed = Math.floor(marker.time * 1000 + marker.stepMagnitude * 1000);
+          const markerPalette = getStepFlowerVariant(markerSeed).palette;
+          const useVariantPalette = stepMarkerStyle === 'flowers' || stepMarkerStyle === 'flowers-3d';
+          const solidColor = useVariantPalette
+            ? markerPalette.markerSolid
+            : marker.foot === 'left'
+              ? '#22d3ee'
+              : '#f472b6';
+          const translucentColor = useVariantPalette
+            ? markerPalette.markerTranslucent
+            : marker.foot === 'left'
+              ? 'rgba(34, 211, 238, 0.65)'
+              : 'rgba(244, 114, 182, 0.65)';
           const offsetX = cameraMotionRef.current.cumulativeX - marker.camRefX;
           const offsetY = cameraMotionRef.current.cumulativeY - marker.camRefY;
           const drawX = (marker.x + offsetX) * canvas.width;
@@ -643,13 +1264,26 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
           const easedGrowth = 1 - Math.pow(1 - growthProgress, 3);
           const boxHeight = fullBoxHeight * easedGrowth;
           const boxWidth = Math.max(6, radius * 1.15);
-          if (showStepBoxes) {
+          if (stepMarkerStyle === 'boxes') {
             // Grow a box upward from the center of the marker, scaled by raw step magnitude.
             ctx.fillStyle = translucentColor;
             ctx.fillRect(drawX - boxWidth / 2, drawY - boxHeight, boxWidth, boxHeight);
             ctx.strokeStyle = solidColor;
             ctx.lineWidth = 1.5;
             ctx.strokeRect(drawX - boxWidth / 2, drawY - boxHeight, boxWidth, boxHeight);
+          } else if (stepMarkerStyle === 'flowers' || stepMarkerStyle === 'flowers-3d') {
+            const lifecycle = getFlowerMarkerLifecycleFrame(
+              markerAge,
+              {
+                growSeconds: flowerBloomSeconds,
+                holdSeconds: 0.22,
+                decaySeconds: flowerDecaySeconds,
+              },
+              whimsyIntensity
+            );
+            if (!shouldOverlayFlowersRealtime) {
+              drawFlowerMarker(marker, drawX, drawY, lifecycle);
+            }
           }
           if (showStepPoints) {
             ctx.fillStyle = solidColor;
@@ -664,7 +1298,10 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
       }
 
       // Composite segmented person on top of background/marker layers.
-      const segmentationMask = segmentationMaskRef.current;
+      const segmentationMask =
+        bodyTrackingEnabled && (sourceMode !== 'realtime' || realtimeBackgroundSegmentationEnabled)
+          ? segmentationMaskRef.current
+          : null;
       const personLayer = personLayerCanvasRef.current;
       if (segmentationMask && personLayer) {
         const personCtx = personLayer.getContext('2d');
@@ -679,8 +1316,28 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
       }
 
       // Pose stays on top of the person cutout.
-      if (latestPose && latestPose.length > 0) {
-        drawPose(ctx, latestPose);
+      if (bodyTrackingEnabled && latestPose && latestPose.length > 0) {
+        drawPose(ctx, latestPose, showBodyCamPoints);
+      }
+
+      if (markers.length > 0 && shouldOverlayFlowersRealtime) {
+        for (const marker of markers) {
+          const offsetX = cameraMotionRef.current.cumulativeX - marker.camRefX;
+          const offsetY = cameraMotionRef.current.cumulativeY - marker.camRefY;
+          const drawX = (marker.x + offsetX) * canvas.width;
+          const drawY = (marker.y + offsetY) * canvas.height;
+          const markerAge = Math.max(0, timelineNowSeconds - marker.time);
+          const lifecycle = getFlowerMarkerLifecycleFrame(
+            markerAge,
+            {
+                growSeconds: flowerBloomSeconds,
+              holdSeconds: 0.22,
+                decaySeconds: flowerDecaySeconds,
+            },
+            whimsyIntensity
+          );
+          drawFlowerMarker(marker, drawX, drawY, lifecycle);
+        }
       }
 
       frameCountRef.current += 1;
@@ -701,7 +1358,27 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     } else {
       setIsPlaying(false);
     }
-  }, [boxGrowthSeconds, boxHeightScale, ensurePersonLayerCanvas, loopPlayback, pointSizeScale, resetLoopRelativeMotion, showStepBoxes, showStepPoints, sourceMode, stepSensitivityPercent, trimEnd, trimStart]);
+  }, [
+    bodyTrackingEnabled,
+    boxGrowthSeconds,
+    boxHeightScale,
+    ensurePersonLayerCanvas,
+    flowerBloomSeconds,
+    flowerDecaySeconds,
+    loopPlayback,
+    pointSizeScale,
+    realtimeBackgroundSegmentationEnabled,
+    resetLoopRelativeMotion,
+    showStepPoints,
+    showBodyCamPoints,
+    sourceMode,
+    stepMarkerStyle,
+    stepSensitivityPercent,
+    trimEnd,
+    trimStart,
+    whimsyIntensity,
+    toonTextureMode,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -722,7 +1399,14 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
           segmentationMaskRef.current = results?.segmentationMask ?? null;
           const video = videoRef.current;
           if (video) {
-            lastPoseUpdateTimeRef.current = video.currentTime;
+            if (sourceModeRef.current === 'realtime') {
+              lastPoseUpdateTimeRef.current =
+                realtimeStartPerfRef.current === null
+                  ? 0
+                  : (performance.now() - realtimeStartPerfRef.current) / 1000;
+            } else {
+              lastPoseUpdateTimeRef.current = video.currentTime;
+            }
           }
           latestPoseRef.current = poseLandmarks;
           setFootLayout({
@@ -923,6 +1607,16 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
     }
   }, [duration, sourceMode, trimEnd, trimStart]);
 
+  const latestMarkerTime = stepMarkers.length > 0 ? stepMarkers[stepMarkers.length - 1].time : 0;
+  const timelineWindowStart = sourceMode === 'upload' ? trimStart : Math.max(0, latestMarkerTime - 10);
+  const timelineWindowEnd =
+    sourceMode === 'upload'
+      ? trimEnd
+      : Math.max(timelineWindowStart + 10, latestMarkerTime + 0.001);
+  const timelineMarkers = stepMarkers.filter(
+    (marker) => marker.time >= timelineWindowStart && marker.time <= timelineWindowEnd
+  );
+
   return (
     <div className={`w-full h-full overflow-y-auto bg-slate-950 text-white p-4 ${className}`}>
       <div className="max-w-5xl mx-auto space-y-4">
@@ -953,7 +1647,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
           <button
             type="button"
             onClick={handlePlayPause}
-            disabled={(sourceMode === 'upload' && !videoName) || !isPoseReady}
+            disabled={(sourceMode === 'upload' && !videoName) || (bodyTrackingEnabled && !isPoseReady)}
             className="rounded bg-emerald-600 px-3 py-2 text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isPlaying ? 'Pause' : 'Play'}
@@ -973,13 +1667,31 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         </div>
 
         <div className="rounded border border-slate-700 bg-black/40 p-2 text-xs text-slate-300 flex flex-wrap gap-4">
-          <span>Pose model: {isPoseReady ? 'ready' : 'loading...'}</span>
+          <span>Pose model: {bodyTrackingEnabled ? (isPoseReady ? 'ready' : 'loading...') : 'disabled'}</span>
           <span>Overlay FPS: {fps}</span>
           <span>Landmarks: 33-point MediaPipe Pose</span>
           <span>Detected steps: {stepMarkers.length}</span>
           <span>
             Camera motion: dx {cameraMotion.dx.toFixed(2)}px, dy {cameraMotion.dy.toFixed(2)}px
           </span>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={bodyTrackingEnabled}
+              onChange={(event) => setBodyTrackingEnabled(event.target.checked)}
+              className="w-4 h-4"
+            />
+            <span>Body tracking model</span>
+          </label>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showBodyCamPoints}
+              onChange={(event) => setShowBodyCamPoints(event.target.checked)}
+              className="w-4 h-4"
+            />
+            <span>Show body cam points</span>
+          </label>
         </div>
 
         {sourceMode === 'upload' && (
@@ -1065,7 +1777,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
           </div>
           <div>
             <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
-              <label htmlFor="box-height-scale">Step box height scale</label>
+              <label htmlFor="box-height-scale">Step marker height scale</label>
               <span>{boxHeightScale.toFixed(1)}x</span>
             </div>
             <input
@@ -1079,7 +1791,7 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
               className="w-full"
             />
             <div className="text-[11px] text-slate-400 mt-1">
-              Scales upward box growth from each marker center based on raw step size.
+              Scales marker growth height (boxes) and flower size envelope (flowers / 3D flowers) from each step center.
             </div>
           </div>
           <div>
@@ -1098,8 +1810,78 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
               className="w-full"
             />
             <div className="text-[11px] text-slate-400 mt-1">
-              Controls how quickly step boxes grow from zero to full height.
+              Controls how quickly each step marker grows from zero to full size.
             </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+              <label htmlFor="flower-bloom-seconds">Bloom timing</label>
+              <span>{flowerBloomSeconds.toFixed(2)}s</span>
+            </div>
+            <input
+              id="flower-bloom-seconds"
+              type="range"
+              min={0.05}
+              max={3}
+              step={0.05}
+              value={flowerBloomSeconds}
+              onChange={(event) => setFlowerBloomSeconds(parseFloat(event.target.value))}
+              className="w-full"
+            />
+            <div className="text-[11px] text-slate-400 mt-1">
+              Controls how quickly flower petals open from bud to bloom.
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+              <label htmlFor="flower-decay-seconds">Decay timing</label>
+              <span>{flowerDecaySeconds.toFixed(2)}s</span>
+            </div>
+            <input
+              id="flower-decay-seconds"
+              type="range"
+              min={0.2}
+              max={5}
+              step={0.05}
+              value={flowerDecaySeconds}
+              onChange={(event) => setFlowerDecaySeconds(parseFloat(event.target.value))}
+              className="w-full"
+            />
+            <div className="text-[11px] text-slate-400 mt-1">
+              Extends or shortens the wilt/decay phase for flower markers.
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+              <label htmlFor="whimsy-intensity">Whimsy intensity</label>
+              <span>{whimsyIntensity.toFixed(2)}x</span>
+            </div>
+            <input
+              id="whimsy-intensity"
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={whimsyIntensity}
+              onChange={(event) => setWhimsyIntensity(parseFloat(event.target.value))}
+              className="w-full"
+            />
+            <div className="text-[11px] text-slate-400 mt-1">
+              Scales cartoon outline thickness, squash/stretch bloom, and toon texture density for flower markers.
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <label htmlFor="toon-texture-mode" className="text-slate-300">Toon texture</label>
+            <select
+              id="toon-texture-mode"
+              value={toonTextureMode}
+              onChange={(event) => setToonTextureMode(event.target.value as ToonTextureMode)}
+              className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-slate-100"
+            >
+              <option value="none">None</option>
+              <option value="stipple">Stipple</option>
+              <option value="hatch">Hatch</option>
+            </select>
           </div>
           <div className="flex flex-wrap gap-4">
             <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
@@ -1111,16 +1893,184 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
               />
               <span>Show step points</span>
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showStepBoxes}
-                onChange={(event) => setShowStepBoxes(event.target.checked)}
-                className="w-4 h-4"
-              />
-              <span>Show step boxes</span>
-            </label>
+            <div className="flex items-center gap-2 text-sm text-slate-200">
+              <label htmlFor="step-marker-style" className="text-slate-300">Step marker style</label>
+              <select
+                id="step-marker-style"
+                value={stepMarkerStyle}
+                onChange={(event) => setStepMarkerStyle(event.target.value as StepMarkerStyle)}
+                className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-slate-100"
+              >
+                <option value="flowers">Growing flowers</option>
+                <option value="flowers-3d">Growing flowers (3D)</option>
+                <option value="boxes">Boxes</option>
+              </select>
+            </div>
           </div>
+          </div>
+        )}
+
+        {sourceMode === 'realtime' && (
+          <div className="rounded border border-slate-700 bg-black/40 p-3 space-y-3">
+            <div className="text-xs text-slate-300">Realtime marker + detection controls</div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                <label htmlFor="step-sensitivity-realtime">Step sensitivity</label>
+                <span>{stepSensitivityPercent.toFixed(1)}% of heel-to-ankle span</span>
+              </div>
+              <input
+                id="step-sensitivity-realtime"
+                type="range"
+                min={1}
+                max={20}
+                step={0.5}
+                value={stepSensitivityPercent}
+                onChange={(event) => setStepSensitivityPercent(parseFloat(event.target.value))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                <label htmlFor="point-size-scale-realtime">Point size scale</label>
+                <span>{pointSizeScale.toFixed(1)}x</span>
+              </div>
+              <input
+                id="point-size-scale-realtime"
+                type="range"
+                min={0.5}
+                max={4}
+                step={0.1}
+                value={pointSizeScale}
+                onChange={(event) => setPointSizeScale(parseFloat(event.target.value))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                <label htmlFor="box-height-scale-realtime">Step marker height scale</label>
+                <span>{boxHeightScale.toFixed(1)}x</span>
+              </div>
+              <input
+                id="box-height-scale-realtime"
+                type="range"
+                min={0.5}
+                max={500}
+                step={0.5}
+                value={boxHeightScale}
+                onChange={(event) => setBoxHeightScale(parseFloat(event.target.value))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                <label htmlFor="box-growth-speed-realtime">Marker growth duration</label>
+                <span>{boxGrowthSeconds.toFixed(2)}s</span>
+              </div>
+              <input
+                id="box-growth-speed-realtime"
+                type="range"
+                min={0.05}
+                max={3}
+                step={0.05}
+                value={boxGrowthSeconds}
+                onChange={(event) => setBoxGrowthSeconds(parseFloat(event.target.value))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                <label htmlFor="flower-bloom-seconds-realtime">Bloom timing</label>
+                <span>{flowerBloomSeconds.toFixed(2)}s</span>
+              </div>
+              <input
+                id="flower-bloom-seconds-realtime"
+                type="range"
+                min={0.05}
+                max={3}
+                step={0.05}
+                value={flowerBloomSeconds}
+                onChange={(event) => setFlowerBloomSeconds(parseFloat(event.target.value))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                <label htmlFor="flower-decay-seconds-realtime">Decay timing</label>
+                <span>{flowerDecaySeconds.toFixed(2)}s</span>
+              </div>
+              <input
+                id="flower-decay-seconds-realtime"
+                type="range"
+                min={0.2}
+                max={5}
+                step={0.05}
+                value={flowerDecaySeconds}
+                onChange={(event) => setFlowerDecaySeconds(parseFloat(event.target.value))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                <label htmlFor="whimsy-intensity-realtime">Whimsy intensity</label>
+                <span>{whimsyIntensity.toFixed(2)}x</span>
+              </div>
+              <input
+                id="whimsy-intensity-realtime"
+                type="range"
+                min={0}
+                max={2}
+                step={0.05}
+                value={whimsyIntensity}
+                onChange={(event) => setWhimsyIntensity(parseFloat(event.target.value))}
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center gap-2 text-sm text-slate-200">
+              <label htmlFor="toon-texture-mode-realtime" className="text-slate-300">Toon texture</label>
+              <select
+                id="toon-texture-mode-realtime"
+                value={toonTextureMode}
+                onChange={(event) => setToonTextureMode(event.target.value as ToonTextureMode)}
+                className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-slate-100"
+              >
+                <option value="none">None</option>
+                <option value="stipple">Stipple</option>
+                <option value="hatch">Hatch</option>
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showStepPoints}
+                  onChange={(event) => setShowStepPoints(event.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span>Show step points</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={realtimeBackgroundSegmentationEnabled}
+                  onChange={(event) => setRealtimeBackgroundSegmentationEnabled(event.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span>Background segmentation (flowers behind person)</span>
+              </label>
+              <div className="flex items-center gap-2 text-sm text-slate-200">
+                <label htmlFor="step-marker-style-realtime" className="text-slate-300">Step marker style</label>
+                <select
+                  id="step-marker-style-realtime"
+                  value={stepMarkerStyle}
+                  onChange={(event) => setStepMarkerStyle(event.target.value as StepMarkerStyle)}
+                  className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-slate-100"
+                >
+                  <option value="flowers">Growing flowers</option>
+                  <option value="flowers-3d">Growing flowers (3D)</option>
+                  <option value="boxes">Boxes</option>
+                </select>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1236,11 +2186,11 @@ export function VideoPoseUploadVisual({ className = '' }: VideoPoseUploadVisualP
         <div className="rounded border border-slate-700 bg-black/40 p-2">
           <div className="text-xs text-slate-400 mb-1">Step markers timeline</div>
           <div className="relative h-5 rounded bg-slate-800/70 overflow-hidden">
-            {duration > 0 &&
-              stepMarkers
-                .filter((marker) => marker.time >= trimStart && marker.time <= trimEnd)
-                .map((marker, index) => {
-                  const relative = (marker.time - trimStart) / Math.max(0.0001, trimEnd - trimStart);
+            {(sourceMode === 'upload' ? duration > 0 : timelineMarkers.length > 0) &&
+              timelineMarkers.map((marker, index) => {
+                  const relative =
+                    (marker.time - timelineWindowStart) /
+                    Math.max(0.0001, timelineWindowEnd - timelineWindowStart);
                   return (
                     <div
                       key={`${marker.time}-${index}`}

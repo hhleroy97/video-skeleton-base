@@ -12,6 +12,8 @@ import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/h
 import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS } from '@/components/hand-tracking/MidasTouchVisual';
 import { PcaStoryVisual } from '@/components/hand-tracking/PcaStoryVisual';
 import { VideoPoseUploadVisual } from '@/components/hand-tracking/VideoPoseUploadVisual';
+import { FlowerLifecycleVisual } from '@/components/hand-tracking/FlowerLifecycleVisual';
+import { StepFlowerDebugVisual } from '@/components/hand-tracking/StepFlowerDebugVisual';
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { ConfigSaveLoadCompact } from '@/components/hand-tracking/ConfigSaveLoadCompact';
@@ -140,6 +142,12 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
       case 'VideoPoseUploadVisual':
         // Video pose upload visualization - rendered separately
         return null;
+      case 'FlowerLifecycleVisual':
+        // Flower lifecycle visualization - rendered separately
+        return null;
+      case 'StepFlowerDebugVisual':
+        // Step flower marker debug visualization - rendered separately
+        return null;
       // Add more component cases here as needed
       default:
         return <div>Visual component not implemented yet</div>;
@@ -210,6 +218,16 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
           <VideoPoseUploadVisual className="w-full h-full" />
         </div>
       )}
+      {visualConfig.component === 'FlowerLifecycleVisual' && (
+        <div className="absolute inset-0 z-30">
+          <FlowerLifecycleVisual className="w-full h-full" />
+        </div>
+      )}
+      {visualConfig.component === 'StepFlowerDebugVisual' && (
+        <div className="absolute inset-0 z-30">
+          <StepFlowerDebugVisual className="w-full h-full" />
+        </div>
+      )}
 
       {/* Camera feed - different layout based on visual type */}
       {visualConfig.component === 'BasicHandTracking' ? (
@@ -228,7 +246,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
             </div>
           )}
         </div>
-      ) : visualConfig.component === 'VideoPoseUploadVisual' ? null : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' || visualConfig.component === 'PcaStoryVisual' ? (
+      ) : visualConfig.component === 'VideoPoseUploadVisual' || visualConfig.component === 'FlowerLifecycleVisual' || visualConfig.component === 'StepFlowerDebugVisual' ? null : visualConfig.component === 'Hand3DVisual' || visualConfig.component === 'PrismHandVisual' || visualConfig.component === 'OneLineHandVisual' || visualConfig.component === 'ConstellationVisual' || visualConfig.component === 'MidasTouchVisual' || visualConfig.component === 'PcaStoryVisual' ? (
         // Small camera feed overlay for 3D hand visualization
         <div className="absolute bottom-4 right-4 z-50 w-48 h-36 rounded-lg overflow-hidden border-2 border-white/40 shadow-lg">
           {handTrackingEnabled ? (
@@ -1085,7 +1103,7 @@ export default function VisualPage({ params }: { params: Promise<{ visualId: str
             </div>
           </div>
         </div>
-      ) : visualConfig.component === 'VideoPoseUploadVisual' ? null : (
+      ) : visualConfig.component === 'VideoPoseUploadVisual' || visualConfig.component === 'FlowerLifecycleVisual' || visualConfig.component === 'StepFlowerDebugVisual' ? null : (
         <div className="absolute bottom-4 right-4 z-50">
           <div className="bg-gray-800/80 backdrop-blur-sm rounded-lg p-3">
             <label className="flex items-center gap-2 text-sm text-white cursor-pointer">

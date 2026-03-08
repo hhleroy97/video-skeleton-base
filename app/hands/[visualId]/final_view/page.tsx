@@ -15,6 +15,8 @@ import { ConstellationVisual, type ConstellationControls, DEFAULT_CONSTELLATION_
 import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS } from '@/components/hand-tracking/MidasTouchVisual';
 import { PcaStoryVisual } from '@/components/hand-tracking/PcaStoryVisual';
 import { VideoPoseUploadVisual } from '@/components/hand-tracking/VideoPoseUploadVisual';
+import { FlowerLifecycleVisual } from '@/components/hand-tracking/FlowerLifecycleVisual';
+import { StepFlowerDebugVisual } from '@/components/hand-tracking/StepFlowerDebugVisual';
 import { useTrackingSettings } from '@/components/providers/TrackingSettingsProvider';
 
 import { getVisualConfig } from '../../visuals-config';
@@ -154,6 +156,10 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
         return <PcaStoryVisual hands={hands3D} className="w-full h-full" />;
       case 'VideoPoseUploadVisual':
         return <VideoPoseUploadVisual className="w-full h-full" />;
+      case 'FlowerLifecycleVisual':
+        return <FlowerLifecycleVisual className="w-full h-full" />;
+      case 'StepFlowerDebugVisual':
+        return <StepFlowerDebugVisual className="w-full h-full" />;
       default:
         return <div className="p-6">Visual component not implemented yet</div>;
     }
@@ -198,7 +204,10 @@ export default function FinalViewPage({ params }: { params: Promise<{ visualId: 
             </div>
 
             {/* Tracking preview lives here in final_view so the main canvas stays clean */}
-            {visualConfig.component !== 'BasicHandTracking' && visualConfig.component !== 'VideoPoseUploadVisual' && (
+            {visualConfig.component !== 'BasicHandTracking' &&
+              visualConfig.component !== 'VideoPoseUploadVisual' &&
+              visualConfig.component !== 'FlowerLifecycleVisual' &&
+              visualConfig.component !== 'StepFlowerDebugVisual' && (
               <div className="rounded-lg border border-white/10 overflow-hidden">
                 <div className="px-3 py-2 bg-black/40 border-b border-white/10 flex items-center justify-between">
                   <div className="text-sm font-medium">Tracking</div>

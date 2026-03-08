@@ -12,6 +12,8 @@ import { CONSTELLATION_PALETTES, isConstellationPaletteId } from '@/components/h
 import { MidasTouchVisual, type MidasTouchControls, DEFAULT_MIDAS_TOUCH_CONTROLS, countExtendedFingers, type FingerDebugInfo } from '@/components/hand-tracking/MidasTouchVisual';
 import { PcaStoryVisual } from '@/components/hand-tracking/PcaStoryVisual';
 import { VideoPoseUploadVisual } from '@/components/hand-tracking/VideoPoseUploadVisual';
+import { FlowerLifecycleVisual } from '@/components/hand-tracking/FlowerLifecycleVisual';
+import { StepFlowerDebugVisual } from '@/components/hand-tracking/StepFlowerDebugVisual';
 import { FpsOverlay } from '@/components/perf/FpsOverlay';
 import type { HandModelOverlayMode } from '@/components/hand-tracking/handPose';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -193,6 +195,18 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
             <VideoPoseUploadVisual />
           </div>
         );
+      case 'FlowerLifecycleVisual':
+        return (
+          <div className="w-full h-[32rem]">
+            <FlowerLifecycleVisual />
+          </div>
+        );
+      case 'StepFlowerDebugVisual':
+        return (
+          <div className="w-full h-[36rem]">
+            <StepFlowerDebugVisual />
+          </div>
+        );
       // Add more component cases here as needed
       default:
         return <div>Visual component not implemented yet</div>;
@@ -295,6 +309,26 @@ export default function ControlPanelPage({ params }: { params: Promise<{ visualI
               <CardTitle>Uploaded Video Pose Tracking</CardTitle>
               <CardDescription>
                 Upload a prerecorded clip and run MediaPipe body tracking directly on the video.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>{renderVisual()}</CardContent>
+          </Card>
+        ) : visualConfig.component === 'FlowerLifecycleVisual' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Flower Lifecycle Asset Preview</CardTitle>
+              <CardDescription>
+                Reusable 3D flower asset that autoplays growth, bloom, and wilting over a looping timeline.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>{renderVisual()}</CardContent>
+          </Card>
+        ) : visualConfig.component === 'StepFlowerDebugVisual' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Step Flower Marker Debug Lab</CardTitle>
+              <CardDescription>
+                Isolated development surface for the viz9 flower step-marker renderer so style and timing can be tuned outside pose detection.
               </CardDescription>
             </CardHeader>
             <CardContent>{renderVisual()}</CardContent>
